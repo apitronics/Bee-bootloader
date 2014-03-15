@@ -48,8 +48,9 @@ print XbeePortName
 
 ser.flush()
 
+maximumPayloadSize = 256
 
-def bigTest(length=255):
+def bigTest(length=256):
 	bigData=[]
 
 	for i in range(0,length):
@@ -70,6 +71,12 @@ def broadcast(string):
 	listen()
 
 def sendHex(hexArray, address):
+	for i in range(0,len(hexArray)/maximumPayloadSize+1):
+		sendDataPacket(hexArray[i*maximumPayloadSize:min(len(hexArray),(i+1)*maximumPayloadSize)],address)
+	
+	
+
+def sendDataPacket(packet,address):	
 	#initialize hexAPI with standard beginning
 	hexAPI=[0x7E, 0x00, 0x00, 0x10, 0x01]
 	#Start [Delimiter, MSB (length), LSB (length), Frame Type (ie: transmit), Frame ID (ie: want ACK)]
@@ -80,7 +87,7 @@ def sendHex(hexArray, address):
         
 	#hexAPI+=[0xFF,0xFE]			#[maximum hops, options (disabled)]
 						#add on payload
-	for i in hexArray:
+	for i in packet:
                         hexAPI+=[i]
 
 	length = len(hexAPI)-3
@@ -103,7 +110,7 @@ def sendTilACK(hexAPI):
 	#print hexAPI
 	#while len(hexAPI)>0:
 	#	ser.write(array.array('B',PI.pop()]).tostring())
-		
+	print hexAPI
 	data = ''
 	#for i in range(0,len(hexAPI)/240):
 	for i in hexAPI:
