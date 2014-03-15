@@ -22,14 +22,14 @@ BOOTLOADER
 API Specifications
 
 Any packet has this kind of prefix:
-    <
-| START DELIMITER (0x7E) | LENGTH (MSB) | LENGTH (LSB)     | FRAME TYPE (TRANSMIT=0x10) | FRAME ID (want ACK) | 
-|           0            |      1       |        2         |            3               |          4
-    >
+
+>| START DELIMITER (0x7E) | LENGTH (MSB) | LENGTH (LSB)     | FRAME TYPE (TRANSMIT=0x10) | FRAME ID (want ACK) | 
+>|           0            |      1       |        2         |            3               |          4
+
 
 Finally, there is a suffix of the checksum AND the escape bit
 
-    < | CHECKSUM | >
+>| CHECKSUM |
 
 In python, checksum can be calcualted: <(0xFF-sum(i[3:-2])&255)>
 WARNING: this gets a little trickier with escape bytes 
