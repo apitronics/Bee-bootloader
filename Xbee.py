@@ -48,12 +48,12 @@ print XbeePortName
 
 ser.flush()
 
-bigData=[]
 
-for i in range(0,240):
-	bigData+=[0xFF&i]
+def bigTest(length=255):
+	bigData=[]
 
-def bigTest():
+	for i in range(0,length):
+		bigData+=[0xFF&i]
 	sendHex(bigData,[0,0,0,0,0,0,0xFF,0xFF])
 
 def test():
@@ -83,8 +83,9 @@ def sendHex(hexArray, address):
 	for i in hexArray:
                         hexAPI+=[i]
 
-	        
-        hexAPI[2]=len(hexAPI)-3                      
+	length = len(hexAPI)-3
+	hexAPI[1]=(length&0xFF00)>>8        
+        hexAPI[2]= length&0x00FF                      
         hexAPI+= [0xFF-sum(hexAPI[3::])&255]
 
 	return sendTilACK(hexAPI)	
@@ -96,14 +97,18 @@ ACK = [126, 0, 7, 139, 1]
 
 #not very robust but a start
 #there should be the MY address and stuff
-from time import sleep
 
+import struct 
 def sendTilACK(hexAPI):
 	#print hexAPI
 	#while len(hexAPI)>0:
 	#	ser.write(array.array('B',PI.pop()]).tostring())
 		
-	data = array.array('B',hexAPI).tostring()
+	data = ''
+	#for i in range(0,len(hexAPI)/240):
+	for i in hexAPI:
+		data+=struct.pack('B',i)
+	#data array.array('B',hexAPI[i*240:(i+1)*240]).tostring()
 	ser.write(data)
 	
 	#data = array.array('B',hexAPI).tostring()
