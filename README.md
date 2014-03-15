@@ -6,8 +6,7 @@ Reference: [Xbee 900HB Manual](ftp://ftp1.digi.com/support/documentation/9000217
 Bee bootloader project
 
 PYTHON
-- figure out how to ~120kb efficiently using the Xbees in API mode
-  - right now we're getting an overflow bug
+- maximum packet size with Xbee 900HB is 256. Expressed as global variable in Xbee.py
 - improve library so that messages are objects
   - make sure print prints numbers in HEX
 - refactor things so that escape bits are used (Arduino Xbee library requires escape characters so that way we match it)
