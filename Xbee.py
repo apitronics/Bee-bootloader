@@ -188,20 +188,26 @@ def formatAPI(hexAPI,string=None,value=None):
 	print hexAPI
 	return array.array('B',hexAPI).tostring()
 
+
 def listen():
         received=[]
         limit=3
         tries=0
-        while True:
-                received += ser.readline()
-                tries+=1
-                if tries>limit:
-                        break
+	raw='begin'
+
+	while raw!='':
+		raw = ser.readline()
+		if raw!='':
+			received+=raw
+                #tries+=1
+                #if tries>limit:
+                #        break
 
         dec = []
         cur = []
         for i in received:
-                cur += [binascii.b2a_qp(i,False,False,False)]
+		if i!=['']:
+                	cur += [binascii.b2a_qp(i,False,False,False)]
         for i in cur:
                 if cmp(i[0],'='):
                         dec+=[ord(i)]
@@ -221,7 +227,7 @@ def listen():
  
         for i,j in enumerate(dec):
 		try:
-                	if j==126:      #if its beginning of msg
+                	if j==126: #if its beginning of msg
                    		length = dec[i+1]*16**2 + dec[i+2] #check how long the msg is
 				msgs += [dec[i:3+(i+length+1)] ] #add element to msgs list
 		except:
@@ -230,16 +236,66 @@ def listen():
         #check the checksum
         for i in msgs:
                 if i[-1]!=(0xFF-sum(i[3:-1])&255):
+			print i
                         msgs.remove(i)
-                        print "Received corrupted message" 
+                        print "Received corrupted message"
         return msgs
+
+def read():
+        received=[]
+        #limit=3
+        #tries=0
+        #while True:
+        #        received += ser.readline()
+        #        tries+=1
+        #        if tries>limit:
+        #                break
+	received = ser.readline()
+        if received!='':
+        	received = binascii.b2a_qp(received,False,False,False)
+        else:
+		return None
+
+	print received
+	
+        #if not cmp(cur[0],'='):
+	#	convert = 0
+        #       for j in range(1,3):
+        #                    
+	#                if (ord(cur[j])>64):
+        #                        convert += (ord(cur[j])-55)
+        #                else:
+        #                        convert += (ord(cur[j])-48)
+        #                if j==1:
+        #                        convert=convert*16
+                                        
+        #        dec=convert
+	
+	#print dec 
+
+	#msg=[]
+ 
+        #for i,j in enumerate(dec):
+	#	try:
+        #        	if j==126:      #if its beginning of msg
+        #           		length = dec[i+1]*16**2 + dec[i+2] #check how long the msg is
+	#			msgs += [dec[i:3+(i+length+1)] ] #add element to msgs list
+	#	except:
+	#		print "excepted listen()"
+	#payloads=[]
+        
+	#check the checksum
+        #if msg[-1]!=(0xFF-sum(msg[3:-1])&255):
+	#        msgs.remove(i)
+        #        print "Received corrupted message" 
+        #return msg
 
 def listenForPayloads():
 	msgs = listen()
 	payloads=[]	
-	for i in msgs:
-		if i[3]==144:
-			payloads+= [{'origin': i[4:12], 'payload': i[15:len(i)-1]}]
+	#for i in msgs:
+	if i[3]==144:
+		payloads+= [{'origin': i[4:12], 'payload': i[15:len(i)-1]}]
 	return payloads
 
 def mapNetwork():
