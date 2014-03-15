@@ -24,6 +24,7 @@ API Specifications
 Any packet has this kind of prefix:
 
 >| START DELIMITER (0x7E) | LENGTH (MSB) | LENGTH (LSB)     | FRAME TYPE (TRANSMIT=0x10) | FRAME ID (want ACK) | 
+
 >|           0            |      1       |        2         |            3               |          4
 
 
