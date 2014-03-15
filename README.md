@@ -23,9 +23,9 @@ API Specifications
 
 Any packet has this kind of prefix:
 
->| START DELIMITER (0x7E) | LENGTH (MSB) | LENGTH (LSB)     | FRAME TYPE (TRANSMIT=0x10) | FRAME ID (want ACK) | 
+...| START DELIMITER (0x7E) | LENGTH (MSB) | LENGTH (LSB)     | FRAME TYPE (TRANSMIT=0x10) | FRAME ID (want ACK) | 
 
->|           0            |      1       |        2         |            3               |          4
+...|           0            |      1       |        2         |            3               |          4
 
 
 Finally, there is a suffix of the checksum. In python, checksum can be calcualted: <(0xFF-sum(i[3:-2])&255)>
