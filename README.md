@@ -28,4 +28,5 @@ Any packet has this kind of prefix:
 
 
 Finally, there is a suffix of the checksum. In python, checksum can be calcualted: <(0xFF-sum(i[3:-2])&255)>
-*WARNING*: this gets a little trickier with escape bytes 
+
+**WARNING**: this gets a little trickier with escape bytes 
