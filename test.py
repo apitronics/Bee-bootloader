@@ -26,10 +26,7 @@ print "Dest  : " + str(originalMsg.destination)
 
 print "Router listening"
 for msg in Router.listenForData():
-	if originalMsg==msg:
-		print "VICTORY"
-	else:
-		print "Data  : " + str(msg.data)
-		print "Origin: " + str(msg.origin)
-		print "Dest  : " + str(msg.destination)
+	print "Data  : " + str(msg.data)
+	print "Origin: " + str(msg.origin)
+	print "Dest  : " + str(msg.destination)
 
