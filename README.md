@@ -1,7 +1,7 @@
 Bee-bootloader
 ==============
 
-Reference: [Xbee 900HB Manual](ftp://ftp1.digi.com/support/documentation/90002173_B.pdf)
+Reference: Xbee 900HB Manual: ftp://ftp1.digi.com/support/documentation/90002173_B.pdf
 
 Bee bootloader project
 
