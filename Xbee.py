@@ -9,17 +9,15 @@
 import logging
 from serial.tools.list_ports import *
 
-XbeePortName = '' 
+print "Ports available: "
 
-print "Enter /dev/ttyUSB#:",
-
-XbeePortName = '/dev/ttyUSB'+raw_input()
-
-#while XbeePortName=='':
-#	for i in comports():
-#		#print i
-#		if i[2]=='USB VID:PID=0403:6001 SNR=A601ECT2' or i[2]=='USB VID:PID=0403:6001 SNR=A601ECO9' or i[2]=='USB VID:PID=0403:6001 SNR=A1012WUJ' or i[2]=='USB VID:PID=0403:6001 SNR=AE01CRRL' or i[2]=='USB VID:PID=0403:6001 SNR=AD01SRWX' or i[2]=='USB VID:PID=0403:6001 SNR=AD01ST0H' or i[2]=='USB VID:PID=0403:6001 SNR=AD01ST0M':
-#			XbeePortName = i[0]
+ports = []
+j=0
+for i in comports():
+		if not i[0].startswith('/dev/ttyS'):
+			ports+=[str(i[0])]
+			print "   Xbee.ports[" +str(j)+ "]: " + str(i[0])
+			j+=1
 
 import serial
 import io
@@ -27,302 +25,271 @@ import array
 import binascii
 import os
 import time
-
-
-#import our saved network map if it exists
-#try:
-#	nM = open('./networkMap.pkl', 'rb')
-#	networkMap = pickle.load(nM)
-#	print "loaded Network Map"
-#except:
-#	networkMap={}
-#	print "creating new Network Map"
-
-networkMap={}
-
-ser = serial.Serial(XbeePortName, 9600, timeout=1)
-
-logging.info(XbeePortName)
-
-print XbeePortName
-
-ser.flush()
-
-maximumPayloadSize = 256
-
-def bigTest(length=256):
-	bigData=[]
-
-	for i in range(0,length):
-		bigData+=[0xFF&i]
-	sendHex(bigData,[0,0,0,0,0,0,0xFF,0xFF])
-
-def test():
-        hexAPI=[0x7E, 0x00, 0x14, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00,
-               0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x00,
-               0x54, 0x78, 0x44, 0x61, 0x74, 0x61, 0xAD]
-        ser.write(array.array('B',hexAPI).tostring())
-        print ser.readlines(200)
-
-def broadcast(string):
-        hexAPI=[0x7E, 0x00, 0x00, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00,
-               0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x00]
-        ser.write(formatAPI(hexAPI,string))
-	listen()
-
-def sendHex(hexArray, address):
-	for i in range(0,len(hexArray)/maximumPayloadSize+1):
-		sendDataPacket(hexArray[i*maximumPayloadSize:min(len(hexArray),(i+1)*maximumPayloadSize)],address)
-	
-	
-
-def sendDataPacket(packet,address):	
-	#initialize hexAPI with standard beginning
-	hexAPI=[0x7E, 0x00, 0x00, 0x10, 0x01]
-	#Start [Delimiter, MSB (length), LSB (length), Frame Type (ie: transmit), Frame ID (ie: want ACK)]
-
-	hexAPI+=address#[0x00, 0x13, 0xA2, 0x00, 0x40, 0x8D,0x05,0x2A] #64 bit address
-	hexAPI+=[0xFF, 0xFE]   #16 bit address
-	hexAPI+=[0x00, 0x00]   #radius and bullshit
-        
-	#hexAPI+=[0xFF,0xFE]			#[maximum hops, options (disabled)]
-						#add on payload
-	for i in packet:
-                        hexAPI+=[i]
-
-	length = len(hexAPI)-3
-	hexAPI[1]=(length&0xFF00)>>8        
-        hexAPI[2]= length&0x00FF                      
-        hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-
-	return sendTilACK(hexAPI)	
-
-ACK = [126, 0, 7, 139, 1]
-#ACK = [126, 0, 7, 139, 1, 56, 102, 0, 0, 0, 213]
-#56 102 is this particular Xbee's MY address
-#this will change!!! 
-
-#not very robust but a start
-#there should be the MY address and stuff
-
 import struct 
-def sendTilACK(hexAPI):
-	#print hexAPI
-	#while len(hexAPI)>0:
-	#	ser.write(array.array('B',PI.pop()]).tostring())
-	print hexAPI
-	data = ''
-	#for i in range(0,len(hexAPI)/240):
-	for i in hexAPI:
-		data+=struct.pack('B',i)
-	#data array.array('B',hexAPI[i*240:(i+1)*240]).tostring()
-	ser.write(data)
+import random
+
+class Message:
+	def __init__(self, origin, data, destination, maxPayload=256):
+		self.origin=origin
+		self.data=data
+		self.maxPayload=maxPayload
+		self.destination=destination
+		self.packets=self._pack(data)
 	
-	#data = array.array('B',hexAPI).tostring()
+	@classmethod
+	def unpack(cls,rawData):
+		origin = rawData[3:15]
+		data = rawData[16:-1]
+		print data
+		return cls(origin,data,[0])
+
+	def _pack(self, data):
+		packets = []
+		for i in range(0,len(data)/(self.maxPayload+3)+1): #break data into packets appropriate for network
+			packets +=[self._createPacket(data[i*self.maxPayload:min(len(data),(i+1)*self.maxPayload)])]
+		return packets
+
+	def _createPacket(self, data):
+		packet=[0x7E, 0x00, 0x00, 0x10, 0x01]	#initialize hexAPI with standard beginning
+		#Start [Delimiter, MSB (length), LSB (length), Frame Type (ie: transmit), Frame ID (ie: want ACK)]
+
+		packet+=self.destination	#64 bit address
+		packet+=[0xFF, 0xFE]   	#16 bit address
+		packet+=[0x00, 0x00]   	#radius and options
+		
+		for i in data:
+                 	       packet+=[i]
+
+		length = len(packet)-3
+		packet[1]=(length&0xFF00)>>8        
+        	packet[2]= length&0x00FF                      
+        	packet+= [0xFF-sum(packet[3::])&255]	
+		return packet		
+
+class Xbee:
+	def __init__(self, port, baud=9600, maximumPayloadSize=256):
+		self.port = port
+		self.baud = baud
+		self.ser = serial.Serial(self.port, self.baud, timeout=1)
+		self.ser.flush()
+		logging.info("Opened Serial to Xbee on " + self.port)
+		self.address=0
+		self.maxPayload=maximumPayloadSize
+
+	def test(self, length=12):
+		data=[]
+
+		for i in range(0,length):
+			data+=[random.randint(0,255)]
+		
+		msg = self.broadcast(data)
+		self.send(msg)
+
+	def broadcast(self, data):
+        	return Message(self.address, data, [0,0,0,0,0,0,0xFF,0xFF], self.maxPayload)
+
+	def send(self, Message):	
+		for packet in Message.packets:
+			print packet
+			data = ''			
+			for j in packet:
+				data+=struct.pack('B',j)
+			while not self.ACK():
+				self.ser.write(data)
 	
-	#ser.write(data)
-	#while not listenForACK():
-	#	pass
+	def ACK(self):
+		ACK = [126, 0, 7, 139, 1]
+		#time.sleep(0.1)
+		response = self.listen()
+		#print "RESPONSES: "
+		#for i in response:
+		#	print i
+		#ser.write(array.array('B',hexAPI).tostring())
+		for i,j in enumerate(response):
+			if j[0:5]==ACK:
+		#		print "good"
+				return True
+				#return response[i+1::]
+		return False
+
+	def listen(self):
+		received=[]
+		#limit=3
+		#tries=0
+		raw='begin'
+
+		while raw!='':
+			raw = self.ser.readline()
+			if raw!='':
+				received+=raw
+			#tries+=1
+			#if tries>limit:
+			#        break
+
+		dec = []
+		cur = []
+		for i in received:
+			if i!=['']:
+				cur += [binascii.b2a_qp(i,False,False,False)]
+		for i in cur:
+			if cmp(i[0],'='):
+				dec+=[ord(i)]
+			else:
+				convert = 0
+				for j in range(1,3):
+					
+					if (ord(i[j])>64):
+						convert += (ord(i[j])-55)
+					else:
+						convert += (ord(i[j])-48)
+					if j==1:
+						convert=convert*16
+						
+				dec+=[convert]
+		msgs=[]
+	 
+		for i,j in enumerate(dec):
+			try:
+				if j==126: #if its beginning of msg
+					length = dec[i+1]*256 + dec[i+2] #check how long the msg is
+					if i+length+3<len(dec):
+						msgs += [dec[i:i+length+4] ] #add element to msgs list
+						#print str(length) + ": "+ str(dec[i:i+length+1])
+			except:
+				print "excepted listen()"
+		
+		#print str(len(msgs)) + " possible messages"
+		#verify checksum
+		for i,j in enumerate(reversed(msgs)): #traverse in reverse so that deleting doesn't shift indices 
+			#print "Expected checksum: " + str(j[-1])
+			#print "Actual checksum  : " + str(0xFF-sum(j[3:-1])&0xFF)
+			if j[-1]!=(0xFF-sum(j[3:-1])&255):
+				del msgs[i]
+				print "Received corrupted message"		
+
+		for i in msgs:
+			obj = Message.unpack(i)
+			print "Data  : " + str(obj.data)
+			print "Origin: " + str(obj.origin)
+			
+			
+		#print str(len(msgs)) + " remaining messages"
+		
+		return msgs
 
 
-def send(hexAPI):
-	sendTilACK(hexAPI)
+	def requestAT(self,string):
+        	hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
+        	self.ser.write(formatAPI(hexAPI, string))
+        	return self.listen()
 
-def listenForACK():
-	time.sleep(0.1)
-	response = listen()
-	print "RESPONSES: "
-	for i in response:
-		print i
-	#ser.write(array.array('B',hexAPI).tostring())
-	for i,j in enumerate(response):
-		if j[0:5]==ACK:
-			print "good"
-			return True
-			#return response[i+1::]
-	return False
+	def setAT(self, string, value):
+        	hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
+        	self.ser.write(formatAPI(hexAPI, string,value))
+		return self.listen()
 
-
-def requestAT(string):
-        hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-        ser.write(formatAPI(hexAPI, string))
-        return listen()
-
-def setAT(string, value):
-        hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-        ser.write(formatAPI(hexAPI, string,value))
-	return listen()
-
-def requestRemoteAT(string, address):
-        hexAPI=[0x7E, 0x00, 0x00, 0x17, 0x01]
-        #hexAPI+=address
-        hexAPI+=[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF]
-	hexAPI+=[0xF0]
-	hexAPI+=[0xFF, 0xFE]   #16 bit address
-	hexAPI+=[0]
-        for i in string:
-		hexAPI+=[ord(i)]
-	print "Command: " + str(hexAPI)
-	tmp = formatAPI(hexAPI)
-	ser.write(tmp)
-	listen()
-
-def ATCommand(string):
-	hexAPI=[0x7E, 0x00, 0x00, 0x08, 0x01]
-	
-	send(formatAPI(hexAPI,string))
-	return listen()
-
-
-def formatAPI(hexAPI,string=None,value=None):
-        if string is not None:
+	def requestRemoteAT(self, string, address):
+		hexAPI=[0x7E, 0x00, 0x00, 0x17, 0x01]
+		#hexAPI+=address
+		hexAPI+=[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF]
+		hexAPI+=[0xF0]
+		hexAPI+=[0xFF, 0xFE]   #16 bit address
+		hexAPI+=[0]
 		for i in string:
 			hexAPI+=[ord(i)]
+		print "Command: " + str(hexAPI)
+		tmp = formatAPI(hexAPI)
+		self.ser.write(tmp)
+		self.listen()
 
-        if value is not None:
-                hexAPI+=[value]
+	def ATCommand(self, string):
+		hexAPI=[0x7E, 0x00, 0x00, 0x08, 0x01]
+		
+		self.send(formatAPI(hexAPI,string))
+		return self.listen()
 
-        hexAPI[2]=len(hexAPI)-3                      
-        hexAPI+= [0xFF-sum(hexAPI[3::])&255]
+
+	def formatAPI(self, hexAPI,string=None,value=None):
+		if string is not None:
+			for i in string:
+				hexAPI+=[ord(i)]
+
+		if value is not None:
+			hexAPI+=[value]
+
+		hexAPI[2]=len(hexAPI)-3                      
+		hexAPI+= [0xFF-sum(hexAPI[3::])&255]
+		
+		print hexAPI
+		return array.array('B',hexAPI).tostring()
+
+
 	
-	print hexAPI
-	return array.array('B',hexAPI).tostring()
 
-
-def listen():
-        received=[]
-        limit=3
-        tries=0
-	raw='begin'
-
-	while raw!='':
-		raw = ser.readline()
-		if raw!='':
-			received+=raw
-                #tries+=1
-                #if tries>limit:
-                #        break
-
-        dec = []
-        cur = []
-        for i in received:
-		if i!=['']:
-                	cur += [binascii.b2a_qp(i,False,False,False)]
-        for i in cur:
-                if cmp(i[0],'='):
-                        dec+=[ord(i)]
-                else:
-                        convert = 0
-                        for j in range(1,3):
-                                
-                                if (ord(i[j])>64):
-                                        convert += (ord(i[j])-55)
-                                else:
-                                        convert += (ord(i[j])-48)
-                                if j==1:
-                                        convert=convert*16
-                                        
-                        dec+=[convert]
-        msgs=[]
- 
-        for i,j in enumerate(dec):
-		try:
-                	if j==126: #if its beginning of msg
-                   		length = dec[i+1]*16**2 + dec[i+2] #check how long the msg is
-				msgs += [dec[i:3+(i+length+1)] ] #add element to msgs list
-		except:
-			print "excepted listen()"
-	payloads=[]
-        #check the checksum
-        for i in msgs:
-                if i[-1]!=(0xFF-sum(i[3:-1])&255):
-			print i
-                        msgs.remove(i)
-                        print "Received corrupted message"
-        return msgs
-
-def read():
-        received=[]
-        #limit=3
-        #tries=0
-        #while True:
-        #        received += ser.readline()
-        #        tries+=1
-        #        if tries>limit:
-        #                break
-	received = ser.readline()
-        if received!='':
-        	received = binascii.b2a_qp(received,False,False,False)
-        else:
-		return None
-
-	print received
+	def listen2(self):
+		received=[]
+		limit=3
+		tries=0
+		while True:
+		        received += self.ser.readline()
+		        tries+=1
+		        if tries>limit:
+		                break
+		dec = []
+		cur = []
+		for i in received:
+		        cur += [binascii.b2a_qp(i,False,False,False)]
+		for i in cur:
+		        if cmp(i[0],'='):
+		                dec+=[ord(i)]
+		        else:
+		                convert = 0
+		                for j in range(1,3):
+		                        
+		                        if (ord(i[j])>64):
+		                                convert += (ord(i[j])-55)
+		                        else:
+		                                convert += (ord(i[j])-48)
+		                        if j==1:
+		                                convert=convert*16
+		                                
+		                dec+=[convert]
+		msgs=[]
+		
+		for i,j in enumerate(dec):
+			try:
+		        	if j==126:      #if its beginning of msg
+		           		length = dec[i+1]*16**2 + dec[i+2] #check how long the msg is
+					msgs += [dec[i:3+(i+length+1)] ] #add element to msgs list
+			except:
+				print "excepted listen()"
+		payloads=[]
+		#check the checksum
+		for i in msgs:
+		        if i[-1]!=(0xFF-sum(i[3:-1])&255):	
+		                print "Received corrupted message:" 
+				#print i
+		                msgs.remove(i)
+		return msgs
 	
-        #if not cmp(cur[0],'='):
-	#	convert = 0
-        #       for j in range(1,3):
-        #                    
-	#                if (ord(cur[j])>64):
-        #                        convert += (ord(cur[j])-55)
-        #                else:
-        #                        convert += (ord(cur[j])-48)
-        #                if j==1:
-        #                        convert=convert*16
-                                        
-        #        dec=convert
-	
-	#print dec 
 
-	#msg=[]
- 
-        #for i,j in enumerate(dec):
-	#	try:
-        #        	if j==126:      #if its beginning of msg
-        #           		length = dec[i+1]*16**2 + dec[i+2] #check how long the msg is
-	#			msgs += [dec[i:3+(i+length+1)] ] #add element to msgs list
-	#	except:
-	#		print "excepted listen()"
-	#payloads=[]
-        
-	#check the checksum
-        #if msg[-1]!=(0xFF-sum(msg[3:-1])&255):
-	#        msgs.remove(i)
-        #        print "Received corrupted message" 
-        #return msg
+	def listenForPayloads(self):
+		msgs = self.listen()
+		payloads=[]	
+		#for i in msgs:
+		if i[3]==144:
+			payloads+= [{'origin': i[4:12], 'payload': i[15:len(i)-1]}]
+		return payloads
 
-def listenForPayloads():
-	msgs = listen()
-	payloads=[]	
-	#for i in msgs:
-	if i[3]==144:
-		payloads+= [{'origin': i[4:12], 'payload': i[15:len(i)-1]}]
-	return payloads
-
-def mapNetwork():
-	nodes = []
-        data = requestAT("ND")
-        for i in data:
-		#data is supposed to be: MY, SH, SL, DB, DB, NI
-		try:
-			if i[2]==25: #this means it is an ND frame
-				print "node found"
-				nodes+= [[i[10], i[11], i[12], i[13],i[14], i[15], i[16], i[17]]]
-		except:
-			print "was not ND response"
-	return nodes
-def getData(address):
-	response = sendHex([7],address)
-	return response[0][-6:-1]
-
-def onLights(address):
-	sendHex([13],address)
-
-def offLights(address):
-	sendHex([14],address)
-
-def onPump(address):
-	sendHex([17],address)
-
-def offPump(address):
-	sendHex([18],address)
-
+	def mapNetwork(self):
+		nodes = []
+		data = requestAT("ND")
+		for i in data:
+			#data is supposed to be: MY, SH, SL, DB, DB, NI
+			try:
+				if i[2]==25: #this means it is an ND frame
+					print "node found"
+					nodes+= [[i[10], i[11], i[12], i[13],i[14], i[15], i[16], i[17]]]
+			except:
+				print "was not ND response"
+		return nodes
