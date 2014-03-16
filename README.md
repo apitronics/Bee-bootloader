@@ -6,8 +6,7 @@ Reference: [Xbee 900HB Manual](ftp://ftp1.digi.com/support/documentation/9000217
 Bee bootloader project
 
 PYTHON
-- figure out how to ~120kb efficiently using the Xbees in API mode
-  - right now we're getting an overflow bug
+- maximum packet size with Xbee 900HB is 256. Expressed as global variable in Xbee.py
 - improve library so that messages are objects
   - make sure print prints numbers in HEX
 - refactor things so that escape bits are used (Arduino Xbee library requires escape characters so that way we match it)
@@ -28,6 +27,6 @@ Any packet has this kind of prefix:
 |           0            |      1       |        2         |            3               |          4          |
 
 
-Finally, there is a suffix of the checksum. In python, checksum can be calcualted: `(0xFF-sum(i[3:-2])&255)`
+Finally, there is a suffix of the checksum. In python, checksum can be calcualted: `(0xFF-sum(i[3:-1])&255)`
 
 **WARNING**: this gets a little trickier with escape bytes 
