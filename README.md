@@ -7,10 +7,8 @@ Bee bootloader project
 
 PYTHON
 - maximum packet size with Xbee 900HB is 256. Expressed as global variable in Xbee.py
-- improve library so that messages are objects
-  - make sure print prints numbers in HEX
 - refactor things so that escape bits are used (Arduino Xbee library requires escape characters so that way we match it)
-  - page 57 in documentation 
+  - page 57 in documentation
 
   
   
