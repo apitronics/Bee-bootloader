@@ -28,6 +28,12 @@ import time
 import struct 
 import random
 
+def checksum(msg):
+	if msg[-1]!=(0xFF-sum(msg[:-1])&255):
+                        return False
+	return True
+
+
 class Message:
 	def __init__(self, origin, data, destination, maxPayload=256):
 		self.origin=origin
@@ -37,11 +43,10 @@ class Message:
 		self.packets=self._pack(data)
 	
 	@classmethod
-	def unpack(cls,rawData):
-		origin = rawData[3:15]
-		data = rawData[16:-1]
-		print data
-		return cls(origin,data,[0])
+	def unpack(cls,rawMsg,dest):
+		origin = rawMsg[1:9]
+		data = rawMsg[12:-1]	#rawMsg[16:-1]
+		return cls(origin,data,dest)
 
 	def _pack(self, data):
 		packets = []
@@ -73,71 +78,74 @@ class Xbee:
 		self.ser = serial.Serial(self.port, self.baud, timeout=1)
 		self.ser.flush()
 		logging.info("Opened Serial to Xbee on " + self.port)
-		self.address=0
+		self.address=self.requestAT("SH")+self.requestAT("SL")
 		self.maxPayload=maximumPayloadSize
 
-	def test(self, length=12):
+	def test(self, dest=[0,0,0,0,0,0,0xFF,0xFF], length=12):
 		data=[]
 
 		for i in range(0,length):
 			data+=[random.randint(0,255)]
 		
-		msg = self.broadcast(data)
+		msg = Message(self.address, data, dest)
 		self.send(msg)
+		return msg
 
 	def broadcast(self, data):
         	return Message(self.address, data, [0,0,0,0,0,0,0xFF,0xFF], self.maxPayload)
 
 	def send(self, Message):	
 		for packet in Message.packets:
-			print packet
+			#print packet
 			data = ''			
 			for j in packet:
 				data+=struct.pack('B',j)
-			while not self.ACK():
-				self.ser.write(data)
-	
+			#while not self.ACK():
+			self.ser.write(data)
+		return Message
+
 	def ACK(self):
 		ACK = [126, 0, 7, 139, 1]
-		#time.sleep(0.1)
 		response = self.listen()
-		#print "RESPONSES: "
-		#for i in response:
-		#	print i
-		#ser.write(array.array('B',hexAPI).tostring())
+		
 		for i,j in enumerate(response):
 			if j[0:5]==ACK:
-		#		print "good"
 				return True
-				#return response[i+1::]
 		return False
+
+	def listenForData(self):
+		rawMsgs=self.listen()
+		
+		msgs=[]
+
+		for msg in rawMsgs:
+			print msg
+			tmp = Message.unpack(msg,self.address)
+			if tmp is not None:
+				msgs+=[tmp]	
+		return msgs
 
 	def listen(self):
 		received=[]
-		#limit=3
-		#tries=0
 		raw='begin'
 
 		while raw!='':
 			raw = self.ser.readline()
 			if raw!='':
 				received+=raw
-			#tries+=1
-			#if tries>limit:
-			#        break
 
 		dec = []
 		cur = []
 		for i in received:
 			if i!=['']:
 				cur += [binascii.b2a_qp(i,False,False,False)]
+		
 		for i in cur:
 			if cmp(i[0],'='):
 				dec+=[ord(i)]
 			else:
 				convert = 0
-				for j in range(1,3):
-					
+				for j in range(1,3):			
 					if (ord(i[j])>64):
 						convert += (ord(i[j])-55)
 					else:
@@ -146,46 +154,39 @@ class Xbee:
 						convert=convert*16
 						
 				dec+=[convert]
-		msgs=[]
-	 
+
+		rawMsgs=[]
 		for i,j in enumerate(dec):
-			try:
-				if j==126: #if its beginning of msg
-					length = dec[i+1]*256 + dec[i+2] #check how long the msg is
-					if i+length+3<len(dec):
-						msgs += [dec[i:i+length+4] ] #add element to msgs list
-						#print str(length) + ": "+ str(dec[i:i+length+1])
-			except:
-				print "excepted listen()"
+			if j==126: #if its beginning of msg
+				length = dec[i+1]*256 + dec[i+2] #parse msg length
+				if i+length+3<len(dec):
+					potentialMsg = dec[i+3:i+length+4]
+					if checksum(potentialMsg):
+						rawMsgs+=[potentialMsg]
+		return rawMsgs
+
+	def stringToHex(self, string):
+		ret=[]
+		for i in string:
+			ret+=[ord(i)]
+		return ret
 		
-		#print str(len(msgs)) + " possible messages"
-		#verify checksum
-		for i,j in enumerate(reversed(msgs)): #traverse in reverse so that deleting doesn't shift indices 
-			#print "Expected checksum: " + str(j[-1])
-			#print "Actual checksum  : " + str(0xFF-sum(j[3:-1])&0xFF)
-			if j[-1]!=(0xFF-sum(j[3:-1])&255):
-				del msgs[i]
-				print "Received corrupted message"		
-
-		for i in msgs:
-			obj = Message.unpack(i)
-			print "Data  : " + str(obj.data)
-			print "Origin: " + str(obj.origin)
-			
-			
-		#print str(len(msgs)) + " remaining messages"
-		
-		return msgs
-
-
 	def requestAT(self,string):
         	hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-        	self.ser.write(formatAPI(hexAPI, string))
-        	return self.listen()
+		cmd = self.stringToHex(string)
+		hexAPI+=cmd
+		
+		self.ser.write(self.formatAPI(hexAPI))
+        	for i in self.listen():
+			if checksum(i):		  	#valid packet
+				if i[:2]==[136,1]: 	#valid AT response
+					if i[2:4]==cmd: #response to our AT
+						return i[5:-1]
 
-	def setAT(self, string, value):
+	def setAT(self,string,value):
         	hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-        	self.ser.write(formatAPI(hexAPI, string,value))
+		hexAPI+=self.stringToHex(string)
+        	self.ser.write(self.formatAPI(hexAPI, value))
 		return self.listen()
 
 	def requestRemoteAT(self, string, address):
@@ -195,83 +196,28 @@ class Xbee:
 		hexAPI+=[0xF0]
 		hexAPI+=[0xFF, 0xFE]   #16 bit address
 		hexAPI+=[0]
-		for i in string:
-			hexAPI+=[ord(i)]
+		hexAPI+=self.stringToHex(string)
 		print "Command: " + str(hexAPI)
-		tmp = formatAPI(hexAPI)
+		tmp = self.formatAPI(hexAPI)
 		self.ser.write(tmp)
 		self.listen()
 
 	def ATCommand(self, string):
 		hexAPI=[0x7E, 0x00, 0x00, 0x08, 0x01]
-		
+                
+		for i in string:
+	                hexAPI+=[ord(i)]
+
 		self.send(formatAPI(hexAPI,string))
 		return self.listen()
 
 
-	def formatAPI(self, hexAPI,string=None,value=None):
-		if string is not None:
-			for i in string:
-				hexAPI+=[ord(i)]
-
+	def formatAPI(self, hexAPI, value=None):
 		if value is not None:
 			hexAPI+=[value]
-
 		hexAPI[2]=len(hexAPI)-3                      
 		hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-		
-		print hexAPI
 		return array.array('B',hexAPI).tostring()
-
-
-	
-
-	def listen2(self):
-		received=[]
-		limit=3
-		tries=0
-		while True:
-		        received += self.ser.readline()
-		        tries+=1
-		        if tries>limit:
-		                break
-		dec = []
-		cur = []
-		for i in received:
-		        cur += [binascii.b2a_qp(i,False,False,False)]
-		for i in cur:
-		        if cmp(i[0],'='):
-		                dec+=[ord(i)]
-		        else:
-		                convert = 0
-		                for j in range(1,3):
-		                        
-		                        if (ord(i[j])>64):
-		                                convert += (ord(i[j])-55)
-		                        else:
-		                                convert += (ord(i[j])-48)
-		                        if j==1:
-		                                convert=convert*16
-		                                
-		                dec+=[convert]
-		msgs=[]
-		
-		for i,j in enumerate(dec):
-			try:
-		        	if j==126:      #if its beginning of msg
-		           		length = dec[i+1]*16**2 + dec[i+2] #check how long the msg is
-					msgs += [dec[i:3+(i+length+1)] ] #add element to msgs list
-			except:
-				print "excepted listen()"
-		payloads=[]
-		#check the checksum
-		for i in msgs:
-		        if i[-1]!=(0xFF-sum(i[3:-1])&255):	
-		                print "Received corrupted message:" 
-				#print i
-		                msgs.remove(i)
-		return msgs
-	
 
 	def listenForPayloads(self):
 		msgs = self.listen()
