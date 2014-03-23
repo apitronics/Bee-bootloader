@@ -1,7 +1,6 @@
 from Xbee import *
 
 Coordinator = Xbee('/dev/ttyUSB0')
-Router = Xbee('/dev/ttyUSB1')
 
 
 #print Coordinator.requestAT("SH")
@@ -17,16 +16,10 @@ Router = Xbee('/dev/ttyUSB1')
 #                print "SH: " + str(msg[-5:-1])
 
 print "Coordinator send test"
-originalMsg = Coordinator.broadcast([0x32,0x64])
+originalMsg = Coordinator.broadcast([0x1,0x2,3,4,5,6,7,8])
+
 
 print "Data  : " + str(originalMsg.data)
 print "Origin: " + str(originalMsg.origin)
 print "Dest  : " + str(originalMsg.destination)
-
-print "Router listening"
-for msg in Router.listenForData():
-	if msg is not None:
-		print "Data  : " + str(msg.data)
-		print "Origin: " + str(msg.origin)
-		print "Dest  : " + str(msg.destination)
 

@@ -29,11 +29,32 @@ import struct
 import random
 
 def checksum(msg):
+	print "Checksumming: " + str(msg)
 	if msg[-1]!=(0xFF-sum(msg[:-1])&255):
                         return False
 	return True
 
+class ATRequest:
+	def __init__(self, request):
+		self.request=request
+		self.packet=self._makePacket(request)
 
+	def _makePacket(self, string):
+                hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
+                cmd = self._stringToHex(string)
+                hexAPI+=cmd
+                print "Requesting AT#"+string
+                hexAPI[2]=len(hexAPI)-3
+                hexAPI+= [0xFF-sum(hexAPI[3::])&255]
+		return hexAPI
+
+	def _stringToHex(self, string):
+                ret=[]
+                for i in string:
+                        ret+=[ord(i)]
+                return ret
+
+		
 class Message:
 	def __init__(self, origin, data, destination, maxPayload=256):
 		self.origin=origin
@@ -47,6 +68,18 @@ class Message:
 		origin = rawMsg[1:9]
 		data = rawMsg[12:-1]	#rawMsg[16:-1]
 		return cls(origin,data,dest)
+
+        @classmethod
+	def ATrequest(self, string):
+		hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
+                cmd = self.stringToHex(string)
+                hexAPI+=cmd
+
+                print "Requesting AT#"+string
+                hexAPI[2]=len(hexAPI)-3
+                hexAPI+= [0xFF-sum(hexAPI[3::])&255]
+                
+		return clas([0],hexAPI,[0])	
 
 	def _pack(self, data):
 		packets = []
@@ -71,8 +104,11 @@ class Message:
         	packet+= [0xFF-sum(packet[3::])&255]	
 		return packet		
 
+escapeBytes = [0x7E, 0x7D, 0x11, 0x13]
+
 class Xbee:
-	def __init__(self, port, baud=9600, maximumPayloadSize=256):
+	def __init__(self, port, baud=9600, maximumPayloadSize=256, escape=True):
+		self.escape = escape
 		self.port = port
 		self.baud = baud
 		self.ser = serial.Serial(self.port, self.baud, timeout=1)
@@ -88,21 +124,38 @@ class Xbee:
 			data+=[random.randint(0,255)]
 		
 		msg = Message(self.address, data, dest)
-		self.send(msg)
+		for packet in msg.packets:
+			self.send(packet)
+
 		return msg
 
 	def broadcast(self, data):
-        	return Message(self.address, data, [0,0,0,0,0,0,0xFF,0xFF], self.maxPayload)
+		msg = Message(self.address, data, [0,0,0,0,0,0,0xFF,0xFF], self.maxPayload)
+		for packet in msg.packets:
+			self.send(packet)
+		return msg
 
-	def send(self, Message):	
-		for packet in Message.packets:
-			#print packet
-			data = ''			
-			for j in packet:
-				data+=struct.pack('B',j)
-			#while not self.ACK():
-			self.ser.write(data)
-		return Message
+	def send(self, rawPacket):	
+		#the start delimiter does not get escaped
+		packet = rawPacket[:1]
+		rawPacket = rawPacket[1:]
+		if self.escape:
+			#print "dealing with escape"
+			for byte in rawPacket:
+				if byte in escapeBytes:
+					#print "found escape"
+					packet+=[0x7D,byte^0x20]
+				else:
+					packet+=[byte]
+		else:
+			packet+=rawPacket		
+		
+		#print packet
+		data = ''
+		for j in packet:
+			data+= struct.pack('B',j)
+				
+		self.ser.write(data)
 
 	def ACK(self):
 		ACK = [126, 0, 7, 139, 1]
@@ -155,6 +208,17 @@ class Xbee:
 						
 				dec+=[convert]
 
+		if self.escape:
+			decNoEscape = []
+			for index,byte in enumerate(dec):
+				if byte==0x7D:
+					decNoEscape += [ dec[index+1]  ^ 0x20]
+					del dec[index+1]
+				else:
+					decNoEscape += [ byte ]
+
+			dec = decNoEscape	
+		
 		rawMsgs=[]
 		for i,j in enumerate(dec):
 			if j==126: #if its beginning of msg
@@ -163,6 +227,9 @@ class Xbee:
 					potentialMsg = dec[i+3:i+length+4]
 					if checksum(potentialMsg):
 						rawMsgs+=[potentialMsg]
+					else:
+						print "failed checksum: " + str(potentialMsg)
+
 		return rawMsgs
 
 	def stringToHex(self, string):
@@ -172,16 +239,21 @@ class Xbee:
 		return ret
 		
 	def requestAT(self,string):
-        	hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-		cmd = self.stringToHex(string)
-		hexAPI+=cmd
+		self.send(ATRequest(string).packet)
 		
-		self.ser.write(self.formatAPI(hexAPI))
-        	for i in self.listen():
-			if checksum(i):		  	#valid packet
-				if i[:2]==[136,1]: 	#valid AT response
-					if i[2:4]==cmd: #response to our AT
-						return i[5:-1]
+		cmd=[]
+		for i in string:
+			cmd+=[ord(i)]         	
+		for i in self.listen():
+			if i[:2]==[136,1]: 	#valid AT response
+				#print i
+				print "actual: " + str(i[2:4]) + ", expected: " + str(cmd)
+				if i[2:4]==cmd: #response to our AT
+					print i[5:-1]
+					return i[5:-1]
+
+			else:
+				print "failed checksum: " + str(i)
 
 	def setAT(self,string,value):
         	hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
@@ -208,7 +280,7 @@ class Xbee:
 		for i in string:
 	                hexAPI+=[ord(i)]
 
-		self.send(formatAPI(hexAPI,string))
+		self.send(self.formatAPI(hexAPI,string))
 		return self.listen()
 
 
@@ -217,7 +289,7 @@ class Xbee:
 			hexAPI+=[value]
 		hexAPI[2]=len(hexAPI)-3                      
 		hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-		return array.array('B',hexAPI).tostring()
+		return hexAPI
 
 	def listenForPayloads(self):
 		msgs = self.listen()
