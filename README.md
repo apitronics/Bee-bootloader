@@ -59,4 +59,4 @@ When the Xbee FRAME TYPE is transmit, then we enter the world of our own custom 
 
 | ACK and Index          |    Index     | Actual Data      | 
 |:----------------------:|:------------:|:----------------:|
-|           0            |      1       |   2 til end      |    
+|           5            |      6       |   7 til end      |    
