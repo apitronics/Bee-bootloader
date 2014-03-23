@@ -29,8 +29,8 @@ import struct
 import random
 
 def checksum(msg):
-	print "Checksumming: " + str(msg)
 	if msg[-1]!=(0xFF-sum(msg[:-1])&255):
+			print "msg failed checksum: "+ str(msg)
                         return False
 	return True
 
@@ -43,7 +43,7 @@ class ATRequest:
                 hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
                 cmd = self._stringToHex(string)
                 hexAPI+=cmd
-                print "Requesting AT#"+string
+                #print "Requesting AT#"+string
                 hexAPI[2]=len(hexAPI)-3
                 hexAPI+= [0xFF-sum(hexAPI[3::])&255]
 		return hexAPI
@@ -54,20 +54,43 @@ class ATRequest:
                         ret+=[ord(i)]
                 return ret
 
+
 		
-class Message:
-	def __init__(self, origin, data, destination, maxPayload=256):
+class Data:
+	def __init__(self, origin, data, frame, destination=[0,0,0,0,0,0,0xFF,0xFF], maxPayload=256):
 		self.origin=origin
 		self.data=data
 		self.maxPayload=maxPayload
 		self.destination=destination
+		self.frame=frame
 		self.packets=self._pack(data)
 	
 	@classmethod
-	def unpack(cls,rawMsg,dest):
-		origin = rawMsg[1:9]
-		data = rawMsg[12:-1]	#rawMsg[16:-1]
-		return cls(origin,data,dest)
+	def unpack(cls,packets,dest):
+		dataGathered={}
+		ref={}
+		#check that they are all from the same person and have the same data frame
+		for index,packet in enumerate(packets):
+			if index==0:
+				ref={'origin': packet[1:9], 'frame':packet[12]>>4}
+			else:
+				if ref['origin']!=packet[1:9]:
+					print "packet from different person"
+				if ref['frame']!=packet[12]>>4:
+					print "packet is of different frame"
+			#just in case they come out of order
+			dataGathered[ (packet[12]&0xF)<<4 | packet[13] ] = packet[14:-1]
+		
+		data = []
+		for i in range(0,len(dataGathered)):
+			try:
+				data+=dataGathered[i]
+			except:
+				print "missed a packet #" + str(i)	
+		
+		
+		
+		return cls(ref['origin'],data,ref['frame'], dest, )
 
         @classmethod
 	def ATrequest(self, string):
@@ -83,18 +106,25 @@ class Message:
 
 	def _pack(self, data):
 		packets = []
-		for i in range(0,len(data)/(self.maxPayload+3)+1): #break data into packets appropriate for network
-			packets +=[self._createPacket(data[i*self.maxPayload:min(len(data),(i+1)*self.maxPayload)])]
+		dataPerPacket = self.maxPayload-2
+
+		j=0
+		for i in range(0,len(data)/dataPerPacket+1): #break data into packets appropriate for network
+			packets +=[self._createPacket(data[i*dataPerPacket:min(len(data),(i+1)*dataPerPacket)], j)]
+			j+=1
+		print "data broken up into " + str(j) + " packets"
 		return packets
 
-	def _createPacket(self, data):
+	def _createPacket(self, data, index):
 		packet=[0x7E, 0x00, 0x00, 0x10, 0x01]	#initialize hexAPI with standard beginning
-		#Start [Delimiter, MSB (length), LSB (length), Frame Type (ie: transmit), Frame ID (ie: want ACK)]
-
+		#Start [Delimiter, MSB (length), LSB (length), Frame Type (ie: transmit), Frame ID (ie: want ACK)]		
+		#print "Index: " +str(index)
+		#print self.destination
 		packet+=self.destination	#64 bit address
-		packet+=[0xFF, 0xFE]   	#16 bit address
-		packet+=[0x00, 0x00]   	#radius and options
-		
+		packet+=[0xFF, 0xFE]   		#16 bit address
+		packet+=[0x00, 0x00]   		#radius and options
+		packet+=[self.frame & index>>8]	#Apitronics frame (4 bits), upper 4 bits of index
+		packet+=[0xFF & index]		#lower 4 bits of index
 		for i in data:
                  	       packet+=[i]
 
@@ -106,31 +136,50 @@ class Message:
 
 escapeBytes = [0x7E, 0x7D, 0x11, 0x13]
 
+ApitronicsFrame = {'programFlash':0b010, 'settings':0b001, 'dummy':0b000}
+
 class Xbee:
-	def __init__(self, port, baud=9600, maximumPayloadSize=256, escape=True):
+	def __init__(self, port, address=None,  baud=9600, maximumPayloadSize=256, maximumPacketStream=30, escape=True):
 		self.escape = escape
 		self.port = port
 		self.baud = baud
 		self.ser = serial.Serial(self.port, self.baud, timeout=1)
 		self.ser.flush()
 		logging.info("Opened Serial to Xbee on " + self.port)
-		self.address=self.requestAT("SH")+self.requestAT("SL")
+		if address==None:
+			self.address=self.requestAT("SH")+self.requestAT("SL")
+		else:
+			self.address=address
 		self.maxPayload=maximumPayloadSize
+		self.maxPacketStream=maximumPacketStream
 
-	def test(self, dest=[0,0,0,0,0,0,0xFF,0xFF], length=12):
+	def test(self, destination, length=512):
 		data=[]
 
 		for i in range(0,length):
 			data+=[random.randint(0,255)]
 		
-		msg = Message(self.address, data, dest)
-		for packet in msg.packets:
-			self.send(packet)
+		msg = Data(self.address, data, ApitronicsFrame['dummy'], destination)
+	
+		for i in range(0,len(msg.packets)/self.maxPacketStream+1):	
+			for packet in msg.packets[i*self.maxPacketStream:min(len(msg.packets),(i+1)*self.maxPacketStream)]:
+				self.send(packet)
+			if len(msg.packets)>(i+1)*self.maxPacketStream:
+				self.waitForACK()
+			  
 
+		#for packet in msg.packets:
+		#	self.send(packet)
 		return msg
 
+	def waitForACK(self):
+		print "WAITING FOR ACK"
+		while True:
+			
+			print "ack?: " + str(self.listen())
+
 	def broadcast(self, data):
-		msg = Message(self.address, data, [0,0,0,0,0,0,0xFF,0xFF], self.maxPayload)
+		msg = Data(self.address, data, ApitronicsFrame['dummy'], self.maxPayload)
 		for packet in msg.packets:
 			self.send(packet)
 		return msg
@@ -150,7 +199,6 @@ class Xbee:
 		else:
 			packet+=rawPacket		
 		
-		#print packet
 		data = ''
 		for j in packet:
 			data+= struct.pack('B',j)
@@ -167,16 +215,13 @@ class Xbee:
 		return False
 
 	def listenForData(self):
-		rawMsgs=self.listen()
-		
-		msgs=[]
-
-		for msg in rawMsgs:
-			print msg
-			tmp = Message.unpack(msg,self.address)
-			if tmp is not None:
-				msgs+=[tmp]	
-		return msgs
+		rec = self.listen()
+		#print rec
+		if rec!=[]:
+			#print "UNPACKING"
+			return Data.unpack(rec,self.address)
+		else:
+			return None
 
 	def listen(self):
 		received=[]
@@ -186,7 +231,6 @@ class Xbee:
 			raw = self.ser.readline()
 			if raw!='':
 				received+=raw
-
 		dec = []
 		cur = []
 		for i in received:
@@ -207,6 +251,8 @@ class Xbee:
 						convert=convert*16
 						
 				dec+=[convert]
+		
+
 
 		if self.escape:
 			decNoEscape = []
@@ -221,14 +267,12 @@ class Xbee:
 		
 		rawMsgs=[]
 		for i,j in enumerate(dec):
-			if j==126: #if its beginning of msg
+			if j==126 and : #if its beginning of msg
 				length = dec[i+1]*256 + dec[i+2] #parse msg length
 				if i+length+3<len(dec):
 					potentialMsg = dec[i+3:i+length+4]
 					if checksum(potentialMsg):
 						rawMsgs+=[potentialMsg]
-					else:
-						print "failed checksum: " + str(potentialMsg)
 
 		return rawMsgs
 
@@ -247,7 +291,7 @@ class Xbee:
 		for i in self.listen():
 			if i[:2]==[136,1]: 	#valid AT response
 				#print i
-				print "actual: " + str(i[2:4]) + ", expected: " + str(cmd)
+				#print "actual: " + str(i[2:4]) + ", expected: " + str(cmd)
 				if i[2:4]==cmd: #response to our AT
 					print i[5:-1]
 					return i[5:-1]
