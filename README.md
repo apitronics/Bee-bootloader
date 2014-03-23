@@ -5,18 +5,18 @@ Reference: Xbee 900HB Manual: ftp://ftp1.digi.com/support/documentation/90002173
 
 Bee bootloader project
 
-PYTHON
+=== PYTHON ====
 - maximum packet size with Xbee 900HB is 256. Expressed as global variable in Xbee.py
 - refactor things so that escape bits are used (Arduino Xbee library requires escape characters so that way we match it)
   - page 57 in documentation
 
   
   
-BOOTLOADER
+=== BOOTLOADER ====
 - needs to parse firmware code from multiple packets
 
 
-API Specifications
+== API Specifications ==
 
 Any packet will have this kind of prefix:
 
@@ -28,6 +28,8 @@ Any packet will have this kind of prefix:
 Then, there is the actual API frame.
 
 Finally, there is the suffix of the checksum. In python, checksum can be calcualted: `(0xFF-sum(i[3:-1])&255)`
+
+== Escape Bytes ==
 
 Note that the API mode we are using implement escape bytes so that we can be compatible with the Xbee-Arduino library.
 Here is the relevant documentation:
