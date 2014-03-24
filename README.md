@@ -16,7 +16,7 @@ Bee bootloader project
 - needs to parse firmware code from multiple packets
 
 
-## API Specifications ##
+## Xbee API Specifications ##
 
 Any packet will have this kind of prefix:
 
@@ -50,3 +50,13 @@ Raw serial data frame (before escaping interfering bytes):
 Note: In the above example, the length of the raw data (excluding the checksum) is 0x0002 and the checksum of the non-escaped data (excluding frame delimiter and length) is calculated as:
 0xFF - (0x23 + 0x11) = (0xFF - 0x34) = 0xCB
 
+## Apitronics API Specifications ##
+
+When the Xbee FRAME TYPE is transmit, then we enter the world of our own custom API.
+
+
+
+
+| ACK and Index          |    Index     | Actual Data      | 
+|:----------------------:|:------------:|:----------------:|
+|           5            |      6       |   7 til end      |    
