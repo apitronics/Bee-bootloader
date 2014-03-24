@@ -28,6 +28,7 @@ import os
 import time
 import struct 
 import random
+import copy
 
 
 def checksum(msg):
@@ -39,37 +40,24 @@ def checksum(msg):
 def hexToString(hexArr):
 	return ' '.join('0x%02x' % b for b in hexArr)
 
-class ATRequest:
-	def __init__(self, request):
-		self.request=request
-		self.packet=self._makePacket(request)
 
-	def _makePacket(self, string):
-		hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-		cmd = self._stringToHex(string)
-		hexAPI+=cmd
-		#print "Requesting AT#"+string
-		hexAPI[2]=len(hexAPI)-3
-		hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-		return hexAPI
+class DataBucket:
+	def __init__(self, Xbee):
+		self.owner = Xbee
+		self.pile = {}
 
-	def _stringToHex(self, string):
-                ret=[]
-                for i in string:
-                        ret+=[ord(i)]
-                return ret
-
-
-
+	def dump(self, packet):
+		print {'origin': packet[0:8], 'frame':packet[11]>>4, 'index': (0xF&packet[11])<<8 | packet[12]}
+		
+	
+		
 		
 class Data:
-	def __init__(self, origin, data, frame, destination=[0,0,0,0,0,0,0xFF,0xFF], maxPayload=256):
+	def __init__(self, origin, data, frame, destination=[0,0,0,0,0,0,0xFF,0xFF]):
 		self.origin=origin
 		self.data=data
-		self.maxPayload=maxPayload
 		self.destination=destination
 		self.frame=frame
-		self.packets=self._pack(data)
 	
 	@classmethod
 	def unpack(cls,packets,dest):
@@ -99,62 +87,57 @@ class Data:
 			except:
 				print "missed a packet #" + str(i)	
 		
-		
+	
 		
 		return cls(ref['origin'],data,ref['frame'], dest, )
 
-        @classmethod
-	def ATrequest(self, string):
-		hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-                cmd = self.stringToHex(string)
-                hexAPI+=cmd
+	
+	def send(self, Xbee):
+		packets = self._pack(self.data, Xbee.maxPayload)	
+		for packet in packets:
+			Xbee.send(self.destination, packet)
 
-                print "Requesting AT#"+string
-                hexAPI[2]=len(hexAPI)-3
-                hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-                
-		return cls([0],hexAPI,[0])	
+	def _pack(self, data, maxPayload):
+		dataPerPacket = maxPayload-2
+		pieces = []
+		numPieces = len(data)/dataPerPacket+1	
+		for i in range(0,numPieces): #break data into packets appropriate for network
+			pieces += [data[i*dataPerPacket:min(len(data),(i+1)*dataPerPacket)]]
+		print "data broken up into " + str(len(pieces)) + " pieces"
+		return self._packetize(pieces)
 
-	def _pack(self, data):
+	def _packetize(self, pieces):
 		packets = []
-		dataPerPacket = self.maxPayload-2
-
-		j=0
-		for i in range(0,len(data)/dataPerPacket+1): #break data into packets appropriate for network
-			packets +=[self._createPacket(data[i*dataPerPacket:min(len(data),(i+1)*dataPerPacket)], j)]
-			j+=1
-		print "data broken up into " + str(j) + " packets"
-		return packets
-
-	def _createPacket(self, data, index):
-		packet=[0x7E, 0x00, 0x00, 0x10, 0x01]	#initialize hexAPI with standard beginning
+		
+		prefix=[0x7E, 0x00, 0x00, 0x10, 0x01]	#initialize hexAPI with standard beginning
 		#Start [Delimiter, MSB (length), LSB (length), Frame Type (ie: transmit), Frame ID (ie: want ACK)]		
 		#print "Index: " +str(index)
 		#print self.destination
-		packet+=self.destination	#64 bit address
-		packet+=[0xFF, 0xFE]   		#16 bit address
-		packet+=[0x00, 0x00]   		#radius and options
-		packet+=[self.frame<<4 | index>>8]	#Apitronics frame (4 bits), upper 4 bits of index
-		if index!=0 and index%29==0:
-			packet[-1]|=0b10000000  #set ACK request if we've hit 30
-		packet+=[0xFF & index]		#lower 4 bits of index
-
-		for i in data:
-                 	       packet+=[i]
-
-		length = len(packet)-3
-		packet[1]=(length&0xFF00)>>8        
-        	packet[2]= length&0x00FF                      
-        	packet+= [0xFF-sum(packet[3::])&255]	
-		return packet		
+		prefix+=self.destination	#64 bit address
+		prefix+=[0xFF, 0xFE]   		#16 bit address
+		prefix+=[0x00, 0x00]   		#radius and options
+		
+		for index,piece in enumerate(pieces):
+			packet = copy.copy(prefix)
+			
+			if index!=len(pieces)-1:
+ 				packet+=[self.frame<<4 | index>>8]		#Apitronics frame (4 bits), upper 4 bits of index
+			else:
+				packet+=[ApitronicsFrame['end']<<4 | index>>8]	#if its end up transmission, mark it in frame
+			packet+=[0xFF & index]					#lower 4 bits of index
+			packet+=piece
+			length = len(packet)-3
+			packet[1]=(length&0xFF00)>>8        
+			packet[2]= length&0x00FF                      
+			packet+= [0xFF-sum(packet[3::])&255]	
+			packets+=[packet]
+		return packets	
 
 escapeBytes = [0x7E, 0x7D, 0x11, 0x13]
 
-XbeeFrame = {'AT': 0x88, 'Transmit': 0x00}
-ApitronicsFrame = {'programFlash':0b010, 'settings':0b001, 'dummy':0b000}
+XbeeFrame = {'AT': 0x88, 'Transmit': 0x90, 'Transmit ACK': 0x8B}
 
-
-
+ApitronicsFrame = {'programFlash':0b101, 'settings':0b001, 'dummy':0b001, 'end':0b111}
 
 class Message:
 	def __init__(self, frame, data): 
@@ -166,7 +149,7 @@ class Message:
 		return cls(rawMsg[0], rawMsg[1:-1])
 	
 	def __str__(self):
-		return "Frame: " + hexToString(self.frame) + "\nData: " + hexToString(self.data) 	
+		return "Frame: " + str(self.frame) + "\nData: " + hexToString(self.data) 	
 
 
 class AT:
@@ -218,40 +201,33 @@ class AT:
                         ret+=[ord(i)]
                 return ret
 
-	#def _makePacket(self, string):
-         #       hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-          #      cmd = self._stringToHex(string)
-           #     hexAPI+=cmd
-                #print "Requesting AT#"+string
-           #     hexAPI[2]=len(hexAPI)-3
-          #      hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-	#	return hexAPI
-
-	#def _stringToHex(self, string):
-        #        ret=[]
-        #        for i in string:
-        #                ret+=[ord(i)]
-        #        return ret
-
 class Xbee:
 	def __init__(self, port, address=None,  baud=9600, maximumPayloadSize=256, maximumPacketStream=30, escape=True):
 		
 		self.escape = escape
 		self.port = port
 		self.baud = baud
-		self.ser = serial.Serial(self.port, self.baud, timeout=1)
+		self.ser = serial.Serial(self.port, self.baud, timeout=1)	
+		print "Opened Serial to Xbee on " + self.port +", baud " + str(self.baud)
+		
 		self.maxPayload=maximumPayloadSize
 		self.maxPacketStream=maximumPacketStream
 		self.busyClients = []
 		self.outgoing = {}
 		self.incoming = []
 		self.ATresponses = []
-		
+		self.bucket = DataBucket(self)		
+
+
 		necessaryAT = ["SH","SL"]
 		self.AT={}
 		for cmd in necessaryAT:
 			self.AT[cmd]=AT(cmd)
-		print "Opened Serial to Xbee on " + self.port
+
+		if address is not None:
+			self.AT["SH"].set(address[:4])
+			self.AT["SL"].set(address[-4:])
+		
 
 		#start threads
 		self.ser.flush()
@@ -267,6 +243,7 @@ class Xbee:
 		while True:
 			for client in self.outgoing:
 				if client not in self.busyClients and self.outgoing[client]:
+					print "sending to " + str(client)
 					serialData = self.outgoing[client].pop(0)
 					self.ser.write(serialData)
 					break
@@ -329,7 +306,9 @@ class Xbee:
 					response = AT.parse(current.data)
 					self.updateAT(response)
 				elif current.frame==XbeeFrame['Transmit']:
-					print ("Received Transmit")
+					self.bucket.dump(current.data)
+				elif current.frame==XbeeFrame['Transmit ACK']:
+					print "Transmit ACK"
 				else:
 					print "Unhandled Xbee Frame:"
 					print current	
@@ -340,20 +319,17 @@ class Xbee:
 		else:
 			self.AT[newAT.cmd]=newAT
 	
-	def test(self, destination, length=512):
+	def test(self, destination=None, length=512):
 		data=[]
 
 		for i in range(0,length):
 			data+=[random.randint(0,255)]
 		
-		msg = Data(self.address, data, ApitronicsFrame['dummy'], destination)
-	
-		for i in range(0,len(msg.packets)/self.maxPacketStream+1):	
-			for packet in msg.packets[i*self.maxPacketStream:min(len(msg.packets),(i+1)*self.maxPacketStream)]:
-				self.send(packet)
-			if len(msg.packets)>(i+1)*self.maxPacketStream:
-
-				self.waitForACK()
+		if destination is None:
+			msg = Data(self.address, data, ApitronicsFrame['dummy'])
+		else:
+			msg = Data(self.address, data, ApitronicsFrame['dummy'], destination)
+		msg.send(self)	
 
 		return msg
 
@@ -369,7 +345,7 @@ class Xbee:
 			self.send(packet)
 		return msg
 
-	def send(self, dest, rawPacket):	
+	def send(self, dest, rawPacket):
 		#the start delimiter does not get escaped
 		packet = rawPacket[:1]
 		rawPacket = rawPacket[1:]
@@ -388,11 +364,12 @@ class Xbee:
 		for j in packet:
 			data+= struct.pack('B',j)
 		
-		if dest in self.outgoing:
-			self.outgoing[dest]+=[data]
+		destHash=self.hashAddress(dest)		
+
+		if destHash in self.outgoing:
+			self.outgoing[destHash]+=[data]
 		else:
-			self.outgoing[dest]=[data]			
-		#self.ser.write(data)
+			self.outgoing[destHash]=[data]			
 
 	def ACK(self):
 		ACK = [126, 0, 7, 139, 1]
@@ -462,6 +439,9 @@ class Xbee:
 		if i[3]==144:
 			payloads+= [{'origin': i[4:12], 'payload': i[15:len(i)-1]}]
 		return payloads
+
+	def hashAddress(self,arr):
+		return ''.join('{:02x}'.format(x) for x in arr)
 
 	def mapNetwork(self):
 		nodes = []

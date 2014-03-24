@@ -1,32 +1,16 @@
+import thread
 from Xbee import *
 
-Coordinator = Xbee('/dev/ttyUSB0')
-Router = Xbee('/dev/ttyUSB1')
+# manually input address to make testing faster
+Coordinator = Xbee('/dev/ttyUSB7')
+Router = Xbee('/dev/ttyUSB8',[0, 19, 162, 0, 64, 174, 240, 170])
 
+# otherwise let the library figure it out
+#Coordinator = Xbee('/dev/ttyUSB3')
+#Router = Xbee('/dev/ttyUSB4')
+#print Router.address()
 
-#print Coordinator.requestAT("SH")
+Coordinator.test()
 
-#for msg in Coordinator.requestAT("SL"):
-#	print msg
-#	if msg[0:8]==[126, 0, 9, 136, 1, 83, 72, 0]:
-#		print "SH: " + str(msg[-5:-1])
-#
-#for msg in Router.requestAT("SL"):
-#	print msg
-#        if msg[0:8]==[126, 0, 9, 136, 1, 83, 72, 0]:
-#                print "SH: " + str(msg[-5:-1])
-
-print "Coordinator send test"
-originalMsg = Coordinator.broadcast([0x32,0x64])
-
-print "Data  : " + str(originalMsg.data)
-print "Origin: " + str(originalMsg.origin)
-print "Dest  : " + str(originalMsg.destination)
-
-print "Router listening"
-for msg in Router.listenForData():
-	if msg is not None:
-		print "Data  : " + str(msg.data)
-		print "Origin: " + str(msg.origin)
-		print "Dest  : " + str(msg.destination)
-
+while True:
+	pass
