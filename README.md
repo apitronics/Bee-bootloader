@@ -54,9 +54,16 @@ Note: In the above example, the length of the raw data (excluding the checksum) 
 
 When the Xbee FRAME TYPE is transmit, then we enter the world of our own custom API.
 
+Byte 5: 
+  bit 7: ACK request
+  bit 6-4: Apitronics Frame
+  bit 3-0: MS-half Byte Index
 
+Byte 6: LSB Index
 
+This means that the maximum index is 2**12=4096 which is enough to transmit over 1MB.
+It also means that the Apitronics Frame set can have at most 8 frames.
 
-| ACK and Index          |    Index     | Actual Data      | 
+|     ACK and Index      |    Index     | Actual Data      | 
 |:----------------------:|:------------:|:----------------:|
 |           5            |      6       |   7 til end      |    
