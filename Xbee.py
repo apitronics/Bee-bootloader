@@ -40,6 +40,9 @@ def checksum(msg):
 def hexToString(hexArr):
 	return ' '.join('0x%02x' % b for b in hexArr)
 
+def hashArr(arr):
+	return ''.join('{:02x}'.format(x) for x in arr)
+
 
 class DataBucket:
 	def __init__(self, Xbee):
@@ -47,8 +50,29 @@ class DataBucket:
 		self.pile = {}
 
 	def dump(self, packet):
-		print {'origin': packet[0:8], 'frame':packet[11]>>4, 'index': (0xF&packet[11])<<8 | packet[12]}
-		
+		origin= hashArr(packet[0:8])
+		frame = packet[11]>>4
+		index = (0xF&packet[11])<<8 | packet[12]
+		data = packet[13:]
+
+		if origin not in self.pile:
+			self.pile[origin]={}
+
+		self.pile[origin][index]=data
+			 
+		if frame==ApitronicsFrame['end']:
+			print self._parse(origin)
+
+	def _parse(self, origin):
+		parsedData = []
+		rawData=self.pile[origin]
+		for i in range(0,len(rawData)):
+			if i not in rawData:
+				print "missing packet " + str(i) + " from data"
+			else:
+				parsedData += rawData[i]
+
+		return parsedData
 	
 		
 		
@@ -233,7 +257,6 @@ class Xbee:
 		self.ser.flush()
 
 		thread.start_new_thread(self.listen,())		#start listening
-		thread.start_new_thread(self.process,()) 	#start processing
 		thread.start_new_thread(self.talking,())	#start talking
 				
 	def address(self):
@@ -257,61 +280,63 @@ class Xbee:
 				raw = self.ser.readline()
 				if raw!='':
 					received+=raw
-			dec = []
-			cur = []
-			for i in received:
-				if i!=['']:
-					cur += [binascii.b2a_qp(i,False,False,False)]
+			thread.start_new_thread(self.process,(received,))
 			
-			for i in cur:
-				if cmp(i[0],'='):
-					dec+=[ord(i)]
-				else:
-					convert = 0
-					for j in range(1,3):			
-						if (ord(i[j])>64):
-							convert += (ord(i[j])-55)
-						else:
-							convert += (ord(i[j])-48)
-						if j==1:
-							convert=convert*16
-							
-					dec+=[convert]
 
-			if self.escape:
-				decNoEscape = []
-				for index,byte in enumerate(dec):
-					if byte==0x7D:
-						decNoEscape += [ dec[index+1]  ^ 0x20]
-						del dec[index+1]
+	def process(self,received):
+		dec = []
+		cur = []
+		for i in received:
+			if i!=['']:
+				cur += [binascii.b2a_qp(i,False,False,False)]
+		
+		for i in cur:
+			if cmp(i[0],'='):
+				dec+=[ord(i)]
+			else:
+				convert = 0
+				for j in range(1,3):			
+					if (ord(i[j])>64):
+						convert += (ord(i[j])-55)
 					else:
-						decNoEscape += [ byte ]
+						convert += (ord(i[j])-48)
+					if j==1:
+						convert=convert*16
+						
+				dec+=[convert]
 
-				dec = decNoEscape	
-			
-			rawMsgs=[]
-			for i,j in enumerate(dec):
-				if j==126: #if its beginning of msg
-					length = dec[i+1]*256 + dec[i+2] #parse msg length
-					if i+length+3<len(dec):
-						potentialMsg = dec[i+3:i+length+4]
-						if checksum(potentialMsg):
-							self.incoming+=[Message.parse(potentialMsg)]
-
-	def process(self):
-		while True:
-			if self.incoming:
-				current = self.incoming.pop(0)
-				if current.frame==XbeeFrame['AT']:
-					response = AT.parse(current.data)
-					self.updateAT(response)
-				elif current.frame==XbeeFrame['Transmit']:
-					self.bucket.dump(current.data)
-				elif current.frame==XbeeFrame['Transmit ACK']:
-					print "Transmit ACK"
+		if self.escape:
+			decNoEscape = []
+			for index,byte in enumerate(dec):
+				if byte==0x7D:
+					decNoEscape += [ dec[index+1]  ^ 0x20]
+					del dec[index+1]
 				else:
-					print "Unhandled Xbee Frame:"
-					print current	
+					decNoEscape += [ byte ]
+
+			dec = decNoEscape	
+			
+		incoming=[]
+		for i,j in enumerate(dec):
+			if j==126: #if its beginning of msg
+				length = dec[i+1]*256 + dec[i+2] #parse msg length
+				if i+length+3<len(dec):
+					potentialMsg = dec[i+3:i+length+4]
+					if checksum(potentialMsg):
+						incoming+=[Message.parse(potentialMsg)]
+
+		while incoming:
+			current = incoming.pop(0)
+			if current.frame==XbeeFrame['AT']:
+				response = AT.parse(current.data)
+				self.updateAT(response)
+			elif current.frame==XbeeFrame['Transmit']:
+				self.bucket.dump(current.data)
+			elif current.frame==XbeeFrame['Transmit ACK']:
+				print "Transmit ACK"
+			else:
+				print "Unhandled Xbee Frame:"
+				print current	
 				
 	def updateAT(self, newAT):
 		if newAT.cmd in self.AT:
@@ -325,6 +350,7 @@ class Xbee:
 		for i in range(0,length):
 			data+=[random.randint(0,255)]
 		
+		print data
 		if destination is None:
 			msg = Data(self.address, data, ApitronicsFrame['dummy'])
 		else:
@@ -364,7 +390,7 @@ class Xbee:
 		for j in packet:
 			data+= struct.pack('B',j)
 		
-		destHash=self.hashAddress(dest)		
+		destHash=hashArr(dest)		
 
 		if destHash in self.outgoing:
 			self.outgoing[destHash]+=[data]
@@ -439,9 +465,6 @@ class Xbee:
 		if i[3]==144:
 			payloads+= [{'origin': i[4:12], 'payload': i[15:len(i)-1]}]
 		return payloads
-
-	def hashAddress(self,arr):
-		return ''.join('{:02x}'.format(x) for x in arr)
 
 	def mapNetwork(self):
 		nodes = []
