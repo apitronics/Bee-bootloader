@@ -59,9 +59,18 @@ class DataBucket:
 			self.pile[origin]={}
 
 		self.pile[origin][index]=data
-			 
+		if frame==ApitronicsFrame['ACK']:
+			print "reveived ACK"
+			print self.owner.busyClients
+			if origin in self.owner.busyClients:
+				self.owner.busyClients.remove(origin)
+
+			
+		if frame>>3==1:
+			print "ACK has been requested"
+			self.owner.sendACK(packet[0:8])
 		if frame==ApitronicsFrame['end']:
-			print self._parse(origin)
+			print len(self._parse(origin))
 
 	def _parse(self, origin):
 		parsedData = []
@@ -69,6 +78,7 @@ class DataBucket:
 		for i in range(0,len(rawData)):
 			if i not in rawData:
 				print "missing packet " + str(i) + " from data"
+				return None
 			else:
 				parsedData += rawData[i]
 
@@ -83,60 +93,31 @@ class Data:
 		self.destination=destination
 		self.frame=frame
 	
-	@classmethod
-	def unpack(cls,packets,dest):
-		dataGathered={}
-		ref={}
-		#check that they are all from the same person and have the same data frame
-		for index,packet in enumerate(packets):
-			if index==0:
-				ref={'origin': packet[1:9], 'frame':packet[12]>>4}
-			else:
-				if ref['origin']!=packet[1:9]:
-					print "packet from different person"
-				if ref['frame']!=packet[12]>>4:
-
-					if 0b1<<3|ref['frame']==packet[12]>>4:
-						print "ACK REQUEST"
-					else:
-						print "packet is of different frame"
-			#just in case they come out of order
-			dataGathered[ (packet[12]&0xF)<<4 | packet[13] ] = packet[14:-1]
-		
-		
-		data = []
-		for i in range(0,len(dataGathered)):
-			try:
-				data+=dataGathered[i]
-			except:
-				print "missed a packet #" + str(i)	
-		
-	
-		
-		return cls(ref['origin'],data,ref['frame'], dest, )
-
-	
 	def send(self, Xbee):
-		packets = self._pack(self.data, Xbee.maxPayload)	
-		for packet in packets:
-			Xbee.send(self.destination, packet)
+		packets = self._pack(self.data, Xbee)
+		for index, packet in enumerate(packets):
+			if (index+1)%Xbee.maxStream==0:
+				Xbee.send(self.destination, packet, ACKreq=True)
+			else:
+				Xbee.send(self.destination, packet)
 
-	def _pack(self, data, maxPayload):
-		dataPerPacket = maxPayload-2
+	def _pack(self, data, Xbee):
+		dataPerPacket = Xbee.maxPayload-2
 		pieces = []
 		numPieces = len(data)/dataPerPacket+1	
 		for i in range(0,numPieces): #break data into packets appropriate for network
 			pieces += [data[i*dataPerPacket:min(len(data),(i+1)*dataPerPacket)]]
 		print "data broken up into " + str(len(pieces)) + " pieces"
-		return self._packetize(pieces)
+		return self._packetize(pieces, Xbee.maxStream)
 
-	def _packetize(self, pieces):
+	def _packetize(self, pieces, maxStream):
 		packets = []
 		
 		prefix=[0x7E, 0x00, 0x00, 0x10, 0x01]	#initialize hexAPI with standard beginning
 		#Start [Delimiter, MSB (length), LSB (length), Frame Type (ie: transmit), Frame ID (ie: want ACK)]		
 		#print "Index: " +str(index)
 		#print self.destination
+		print self.destination
 		prefix+=self.destination	#64 bit address
 		prefix+=[0xFF, 0xFE]   		#16 bit address
 		prefix+=[0x00, 0x00]   		#radius and options
@@ -144,8 +125,11 @@ class Data:
 		for index,piece in enumerate(pieces):
 			packet = copy.copy(prefix)
 			
-			if index!=len(pieces)-1:
- 				packet+=[self.frame<<4 | index>>8]		#Apitronics frame (4 bits), upper 4 bits of index
+			if index!=len(pieces)-1 or index==0:
+				frame=self.frame
+				packet+=[frame<<4 | index>>8]		#Apitronics frame (4 bits), upper 4 bits of index
+				if(index+1)%maxStream==0:
+					packet[-1]|=0x80
 			else:
 				packet+=[ApitronicsFrame['end']<<4 | index>>8]	#if its end up transmission, mark it in frame
 			packet+=[0xFF & index]					#lower 4 bits of index
@@ -161,7 +145,7 @@ escapeBytes = [0x7E, 0x7D, 0x11, 0x13]
 
 XbeeFrame = {'AT': 0x88, 'Transmit': 0x90, 'Transmit ACK': 0x8B}
 
-ApitronicsFrame = {'programFlash':0b101, 'settings':0b001, 'dummy':0b001, 'end':0b111}
+ApitronicsFrame = {'programFlash':0b101, 'settings':0b001, 'dummy':0b001, 'end':0b111, 'ACK':0b000}
 
 class Message:
 	def __init__(self, frame, data): 
@@ -226,7 +210,7 @@ class AT:
                 return ret
 
 class Xbee:
-	def __init__(self, port, address=None,  baud=9600, maximumPayloadSize=256, maximumPacketStream=30, escape=True):
+	def __init__(self, port, address=None,  baud=9600, maximumPayloadSize=256, maximumPacketStream=8, escape=True):
 		
 		self.escape = escape
 		self.port = port
@@ -235,7 +219,7 @@ class Xbee:
 		print "Opened Serial to Xbee on " + self.port +", baud " + str(self.baud)
 		
 		self.maxPayload=maximumPayloadSize
-		self.maxPacketStream=maximumPacketStream
+		self.maxStream=maximumPacketStream
 		self.busyClients = []
 		self.outgoing = {}
 		self.incoming = []
@@ -265,25 +249,27 @@ class Xbee:
 	def talking(self):
 		while True:
 			for client in self.outgoing:
-				if client not in self.busyClients and self.outgoing[client]:
-					print "sending to " + str(client)
-					serialData = self.outgoing[client].pop(0)
-					self.ser.write(serialData)
-					break
+				if self.outgoing[client] and client not in self.busyClients:
+					cur = self.outgoing[client].pop(0)
+					self.ser.write(cur['data'])
+					if cur['flag']:
+						self.busyClients+=[client]
 
 	def listen(self):
 		while True:	
 			received=[]
 			raw='begin'
 
+			tic=time.clock()
 			while raw!='':
 				raw = self.ser.readline()
 				if raw!='':
-					received+=raw
-			thread.start_new_thread(self.process,(received,))
+					thread.start_new_thread(self.process,(raw,))
 			
 
 	def process(self,received):
+		tic=time.clock()
+
 		dec = []
 		cur = []
 		for i in received:
@@ -336,7 +322,9 @@ class Xbee:
 				print "Transmit ACK"
 			else:
 				print "Unhandled Xbee Frame:"
-				print current	
+				print current
+		print "processing thread ran for: "+ str(time.clock()-tic)
+	
 				
 	def updateAT(self, newAT):
 		if newAT.cmd in self.AT:
@@ -344,34 +332,32 @@ class Xbee:
 		else:
 			self.AT[newAT.cmd]=newAT
 	
-	def test(self, destination=None, length=512):
+	def test(self, destination=None, length=8000):
 		data=[]
 
 		for i in range(0,length):
 			data+=[random.randint(0,255)]
 		
-		print data
 		if destination is None:
 			msg = Data(self.address, data, ApitronicsFrame['dummy'])
 		else:
 			msg = Data(self.address, data, ApitronicsFrame['dummy'], destination)
+		
 		msg.send(self)	
 
 		return msg
 
-	def waitForACK(self):
-		print "WAITING FOR ACK"
-		while True:
-			
-			print "ack?: " + str(self.listen())
-
+	# origin, data, frame, destination=[0,0,0,0,0,0,0xFF,0xFF]
+	def sendACK(self, destination):
+		Data(self.address, [0], 0x000, destination).send(self)
+	
 	def broadcast(self, data):
 		msg = Data(self.address, data, ApitronicsFrame['dummy'], self.maxPayload)
 		for packet in msg.packets:
 			self.send(packet)
 		return msg
 
-	def send(self, dest, rawPacket):
+	def send(self, dest, rawPacket, ACKreq=False):
 		#the start delimiter does not get escaped
 		packet = rawPacket[:1]
 		rawPacket = rawPacket[1:]
@@ -390,12 +376,17 @@ class Xbee:
 		for j in packet:
 			data+= struct.pack('B',j)
 		
-		destHash=hashArr(dest)		
+		if type(dest) is list:
+			destHash=hashArr(dest)
+		else:
+			destHash=dest
 
 		if destHash in self.outgoing:
-			self.outgoing[destHash]+=[data]
+			self.outgoing[destHash]+=[{'data':data, 'flag':ACKreq}]
 		else:
-			self.outgoing[destHash]=[data]			
+			self.outgoing[destHash]=[{'data':data, 'flag':ACKreq}]
+		if ACKreq:
+			print "time to request ACK"	
 
 	def ACK(self):
 		ACK = [126, 0, 7, 139, 1]
