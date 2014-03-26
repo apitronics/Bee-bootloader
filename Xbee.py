@@ -54,23 +54,31 @@ class DataBucket:
 		frame = packet[11]>>4
 		index = (0xF&packet[11])<<8 | packet[12]
 		data = packet[13:]
+		if frame==ApitronicsFrame['CTS']:
+			print "received CTS from " + origin
+			if origin in self.owner.busyClients:
+				origin + "removed"
+				self.owner.busyClients.remove(origin)
+			return
 
 		if origin not in self.pile:
 			self.pile[origin]={}
 
 		self.pile[origin][index]=data
-		if frame==ApitronicsFrame['ACK']:
-			print "reveived ACK"
-			print self.owner.busyClients
-			if origin in self.owner.busyClients:
-				self.owner.busyClients.remove(origin)
 
-			
+
+             #  print str(packet[0:8]) +": "+str(index)
 		if frame>>3==1:
-			print "ACK has been requested"
-			self.owner.sendACK(packet[0:8])
+                        print "CTS has been requested"
+                        self.owner.sendACK(packet[0:8])
+
+
+	
 		if frame==ApitronicsFrame['end']:
-			print len(self._parse(origin))
+			parsed = self._parse(origin)
+		
+			if type(parsed) is not None:
+				print "Received all " + str( len(parsed)) + " bytes"
 
 	def _parse(self, origin):
 		parsedData = []
@@ -117,14 +125,13 @@ class Data:
 		#Start [Delimiter, MSB (length), LSB (length), Frame Type (ie: transmit), Frame ID (ie: want ACK)]		
 		#print "Index: " +str(index)
 		#print self.destination
-		print self.destination
+		#print self.destination
 		prefix+=self.destination	#64 bit address
 		prefix+=[0xFF, 0xFE]   		#16 bit address
 		prefix+=[0x00, 0x00]   		#radius and options
 		
 		for index,piece in enumerate(pieces):
 			packet = copy.copy(prefix)
-			
 			if index!=len(pieces)-1 or index==0:
 				frame=self.frame
 				packet+=[frame<<4 | index>>8]		#Apitronics frame (4 bits), upper 4 bits of index
@@ -132,7 +139,7 @@ class Data:
 					packet[-1]|=0x80
 			else:
 				packet+=[ApitronicsFrame['end']<<4 | index>>8]	#if its end up transmission, mark it in frame
-			packet+=[0xFF & index]					#lower 4 bits of index
+			packet+=[0xFF & index]
 			packet+=piece
 			length = len(packet)-3
 			packet[1]=(length&0xFF00)>>8        
@@ -145,7 +152,7 @@ escapeBytes = [0x7E, 0x7D, 0x11, 0x13]
 
 XbeeFrame = {'AT': 0x88, 'Transmit': 0x90, 'Transmit ACK': 0x8B}
 
-ApitronicsFrame = {'programFlash':0b101, 'settings':0b001, 'dummy':0b001, 'end':0b111, 'ACK':0b000}
+ApitronicsFrame = {'programFlash':0b101, 'settings':0b001, 'dummy':0b001, 'end':0b111, 'CTS':0b000}
 
 class Message:
 	def __init__(self, frame, data): 
@@ -210,7 +217,7 @@ class AT:
                 return ret
 
 class Xbee:
-	def __init__(self, port, address=None,  baud=9600, maximumPayloadSize=256, maximumPacketStream=8, escape=True):
+	def __init__(self, port, address=None,  baud=9600, maximumPayloadSize=256, maximumPacketStream=12, escape=True):
 		
 		self.escape = escape
 		self.port = port
@@ -225,7 +232,7 @@ class Xbee:
 		self.incoming = []
 		self.ATresponses = []
 		self.bucket = DataBucket(self)		
-
+		self.semaphore = True
 
 		necessaryAT = ["SH","SL"]
 		self.AT={}
@@ -248,82 +255,91 @@ class Xbee:
 
 	def talking(self):
 		while True:
-			for client in self.outgoing:
-				if self.outgoing[client] and client not in self.busyClients:
-					cur = self.outgoing[client].pop(0)
-					self.ser.write(cur['data'])
-					if cur['flag']:
-						self.busyClients+=[client]
+			try:
+				for client in self.outgoing:
+					if self.outgoing[client] and client not in self.busyClients:
+						cur = self.outgoing[client].pop(0)
+						self.ser.write(cur['data'])
+						if cur['flag']:
+							self.busyClients+=[client]
+						break
+			except:
+				print "dictionary size changed during iteration?!"
+		
 
 	def listen(self):
-		while True:	
+		while True:
+			#tic = time.clock()		
 			received=[]
 			raw='begin'
 
-			tic=time.clock()
 			while raw!='':
 				raw = self.ser.readline()
 				if raw!='':
-					thread.start_new_thread(self.process,(raw,))
-			
-
+					received+=raw
+			#print time.clock()-tic
+			thread.start_new_thread(self.process,(received,))
+	
 	def process(self,received):
-		tic=time.clock()
-
-		dec = []
-		cur = []
-		for i in received:
-			if i!=['']:
-				cur += [binascii.b2a_qp(i,False,False,False)]
-		
-		for i in cur:
-			if cmp(i[0],'='):
-				dec+=[ord(i)]
-			else:
-				convert = 0
-				for j in range(1,3):			
-					if (ord(i[j])>64):
-						convert += (ord(i[j])-55)
-					else:
-						convert += (ord(i[j])-48)
-					if j==1:
-						convert=convert*16
-						
-				dec+=[convert]
-
-		if self.escape:
-			decNoEscape = []
-			for index,byte in enumerate(dec):
-				if byte==0x7D:
-					decNoEscape += [ dec[index+1]  ^ 0x20]
-					del dec[index+1]
-				else:
-					decNoEscape += [ byte ]
-
-			dec = decNoEscape	
+		try:
+			dec = []
+			cur = []
+			for i in received:
+				if i!=['']:
+					cur += [binascii.b2a_qp(i,False,False,False)]
 			
-		incoming=[]
-		for i,j in enumerate(dec):
-			if j==126: #if its beginning of msg
-				length = dec[i+1]*256 + dec[i+2] #parse msg length
-				if i+length+3<len(dec):
-					potentialMsg = dec[i+3:i+length+4]
-					if checksum(potentialMsg):
-						incoming+=[Message.parse(potentialMsg)]
+			for i in cur:
+				if cmp(i[0],'='):
+					dec+=[ord(i)]
+				else:
+					convert = 0
+					for j in range(1,3):			
+						if (ord(i[j])>64):
+							convert += (ord(i[j])-55)
+						else:
+							convert += (ord(i[j])-48)
+						if j==1:
+							convert=convert*16
+							
+					dec+=[convert]
 
-		while incoming:
-			current = incoming.pop(0)
-			if current.frame==XbeeFrame['AT']:
-				response = AT.parse(current.data)
-				self.updateAT(response)
-			elif current.frame==XbeeFrame['Transmit']:
-				self.bucket.dump(current.data)
-			elif current.frame==XbeeFrame['Transmit ACK']:
-				print "Transmit ACK"
-			else:
-				print "Unhandled Xbee Frame:"
-				print current
-		print "processing thread ran for: "+ str(time.clock()-tic)
+			if self.escape:
+				decNoEscape = []
+				for index,byte in enumerate(dec):
+					if byte==0x7D:
+						decNoEscape += [ dec[index+1]  ^ 0x20]
+						del dec[index+1]
+					else:
+						decNoEscape += [ byte ]
+
+				dec = decNoEscape	
+				
+			incoming=[]
+			for i,j in enumerate(dec):
+				if j==126: #if its beginning of msg
+					if i+1<len(dec):
+						length = dec[i+1]*256 + dec[i+2] #parse msg length
+						if i+length+3<len(dec):
+							potentialMsg = dec[i+3:i+length+4]
+							if checksum(potentialMsg):
+								incoming+=[Message.parse(potentialMsg)]
+
+			while incoming:
+				current = incoming.pop(0)
+				if current.frame==XbeeFrame['AT']:
+					response = AT.parse(current.data)
+					self.updateAT(response)
+				elif current.frame==XbeeFrame['Transmit']:
+					self.bucket.dump(current.data)
+				elif current.frame==XbeeFrame['Transmit ACK']:
+					pass
+					#print str(self.address()) + ": transmit ACK"
+				else:
+					print "Unhandled Xbee Frame:"
+					print current
+		except:
+			import traceback
+			print traceback.format_exc()
 	
 				
 	def updateAT(self, newAT):
@@ -332,9 +348,8 @@ class Xbee:
 		else:
 			self.AT[newAT.cmd]=newAT
 	
-	def test(self, destination=None, length=8000):
+	def test(self, destination=None, length=100000):
 		data=[]
-
 		for i in range(0,length):
 			data+=[random.randint(0,255)]
 		
@@ -349,7 +364,7 @@ class Xbee:
 
 	# origin, data, frame, destination=[0,0,0,0,0,0,0xFF,0xFF]
 	def sendACK(self, destination):
-		Data(self.address, [0], 0x000, destination).send(self)
+		Data(self.address, [0], ApitronicsFrame['CTS'], destination).send(self)
 	
 	def broadcast(self, data):
 		msg = Data(self.address, data, ApitronicsFrame['dummy'], self.maxPayload)
@@ -381,12 +396,17 @@ class Xbee:
 		else:
 			destHash=dest
 
+		#while not self.semaphore:
+		#	pass
+
+		#self.semaphore=False
 		if destHash in self.outgoing:
 			self.outgoing[destHash]+=[{'data':data, 'flag':ACKreq}]
 		else:
 			self.outgoing[destHash]=[{'data':data, 'flag':ACKreq}]
-		if ACKreq:
-			print "time to request ACK"	
+		#self.semaphore=True
+		#if ACKreq:
+		#	print "time to request CTS"	
 
 	def ACK(self):
 		ACK = [126, 0, 7, 139, 1]
