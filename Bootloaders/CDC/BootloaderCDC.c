@@ -116,7 +116,7 @@ void Application_Jump_Check(void)
 
 	#if (BOARD == BOARD_A3BU_XPLAINED)
 		/* Check if SW0 is pressed. If not, go into the application. */
-		JumpToApplication |= PORTE.IN & _BV(5);
+		JumpToApplication |= PORTF.IN & _BV(2);
 	#endif
 
 	/* If the reset source was the bootloader and the key is correct, clear it and jump to the application */
@@ -519,6 +519,7 @@ static void CDC_Task(void)
 	}
 	else if (Command == AVR109_COMMAND_SetCurrentAddress)
 	{
+		//CurrAddress =0; //overflow?
 		/* Set the current address to that given by the host (translate 16-bit word address to byte address) */
 		CurrAddress   = (FetchNextCommandByte() << 9);
 		CurrAddress  |= (FetchNextCommandByte() << 1);

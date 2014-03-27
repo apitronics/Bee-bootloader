@@ -86,10 +86,14 @@
 			#define AVR_SIGNATURE_1               0x1E
 			#define AVR_SIGNATURE_2               0x94
 			#define AVR_SIGNATURE_3               0x82
-    #elif defined(__AVR_ATxmega256A3BU__)
+    		#elif defined(__AVR_ATxmega256A3BU__)
 			#define AVR_SIGNATURE_1               0x1E
 			#define AVR_SIGNATURE_2               0x98
 			#define AVR_SIGNATURE_3               0x43
+    		#elif defined(__AVR_ATxmega128A3U__)
+			#define AVR_SIGNATURE_1               0x1E
+			#define AVR_SIGNATURE_2               0x97
+			#define AVR_SIGNATURE_3               0x42
 		#else
 			#error The selected AVR part is not currently supported by this bootloader.
 		#endif

@@ -11,7 +11,7 @@
 
 # Run "make help" for target help.
 
-MCU          = atxmega256a3bu
+MCU          = atxmega128a3u
 ARCH         = XMEGA
 BOARD        = A3BU_XPLAINED
 F_CPU        = 32000000
@@ -29,7 +29,7 @@ LD_FLAGS     = -Wl,--section-start=.text=$(BOOT_START_OFFSET) $(BOOT_API_LD_FLAG
 # Flash size and bootloader section sizes of the target, in KB. These must
 # match the target's total FLASH size and the bootloader size set in the
 # device's fuses.
-FLASH_SIZE_KB         = 256
+FLASH_SIZE_KB         = 128
 BOOT_SECTION_SIZE_KB  = 8
 
 # Bootloader address calculation formulas
