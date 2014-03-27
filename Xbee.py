@@ -242,11 +242,6 @@ class Xbee:
 		for cmd in necessaryAT:
 			self.AT[cmd]=AT(cmd)
 
-		#if address is not None:
-		#	self.AT["SH"].set(address[:4])
-		#	self.AT["SL"].set(address[-4:])
-		
-
 		#start threads
 		self.ser.flush()
 
@@ -254,7 +249,9 @@ class Xbee:
 		thread.start_new_thread(self.talking,())	#start talking
 				
 	def address(self):
-		return self.AT["SH"].get(self) + self.AT["SL"].get(self)
+		SH = self.AT["SH"].get(self)
+		SL = self.AT["SL"].get(self)
+		return SH+SL
 
 	def talking(self):
 		while True:
@@ -347,9 +344,9 @@ class Xbee:
 				
 	def updateAT(self, newAT):
 		if newAT.cmd in self.AT:
-			self.AT[newAT.cmd].param=newAT
+			self.AT[newAT.cmd].param=newAT.param
 		else:
-			self.AT[newAT.cmd].param=newAT
+			self.AT[newAT.cmd]=newAT
 	
 	def test(self, destination=None, length=100000):
 		data=[]
@@ -440,48 +437,31 @@ class Xbee:
         	self.AT[string]=AT(string)
 		self.AT[string].set(self,[value])
 		
-		#hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-		#hexAPI+=self.stringToHex(string)
-        	#self.ser.write(self.formatAPI(hexAPI, value))
-		#return self.listen()
 
-	def requestRemoteAT(self, string, address):
+## THIS IS NOT VERY ELEGANT - NEED TO FIND A WAY TO NEST XBEE's WITHIN AN XBEE AND TO MAKE AT OBJECT REMOTE OR NOT ##
+	def remoteAT(self, address, cmd, param):
 		hexAPI=[0x7E, 0x00, 0x00, 0x17, 0x01]
-		#hexAPI+=address
-		hexAPI+=[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF]
-		hexAPI+=[0xF0]
+		#print address
+		hexAPI+=address
+		#hexAPI+=[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF]
+		#hexAPI+=[0xF0]
 		hexAPI+=[0xFF, 0xFE]   #16 bit address
-		hexAPI+=[0]
-		hexAPI+=self.stringToHex(string)
-		print "Command: " + str(hexAPI)
-		tmp = self.formatAPI(hexAPI)
-		self.ser.write(tmp)
-		self.listen()
+		hexAPI+=[0x02]
+		hexAPI+=self.stringToHex(cmd)
+		hexAPI+=[param]
+                length = len(hexAPI)-3
+                hexAPI[1]=(length&0xFF00)>>8
+                hexAPI[2]= length&0x00FF
+                hexAPI+= [0xFF-sum(hexAPI[3::])&255]
+		self.send(address,hexAPI)
+		
 
-	def ATCommand(self, string):
-		hexAPI=[0x7E, 0x00, 0x00, 0x08, 0x01]
-                
-		for i in string:
-	                hexAPI+=[ord(i)]
+        def _stringToHex(self, string):
+                ret=[]
+                for i in string:
+                        ret+=[ord(i)]
+                return ret
 
-		self.send(self.formatAPI(hexAPI,string))
-		return self.listen()
-
-
-	def formatAPI(self, hexAPI, value=None):
-		if value is not None:
-			hexAPI+=[value]
-		hexAPI[2]=len(hexAPI)-3                      
-		hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-		return hexAPI
-
-	def listenForPayloads(self):
-		msgs = self.listen()
-		payloads=[]	
-		#for i in msgs:
-		if i[3]==144:
-			payloads+= [{'origin': i[4:12], 'payload': i[15:len(i)-1]}]
-		return payloads
 
 	def mapNetwork(self):
 		nodes = []
