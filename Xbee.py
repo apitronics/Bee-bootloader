@@ -179,8 +179,12 @@ class AT:
 	def parse(cls, raw):
 		return cls( chr(raw[1])+chr(raw[2]), raw[-4:]) 
 
-	def set(self, param):
-		self.param=param
+	def set(self, Xbee, param):
+		self.param=None
+		Xbee.send("local",self._APIze(self.cmd,param))
+		while self.param==None:
+                        pass
+		#self.param=param
 
 	def get(self, Xbee):
 		if self.param==None:
@@ -189,26 +193,25 @@ class AT:
 
 	def hardGet(self, Xbee):
 		self.param = None
-		hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-                cmd = self._stringToHex(self.cmd)
-                hexAPI+=cmd
-                #print "Requesting AT#"+string
-                hexAPI[2]=len(hexAPI)-3
-                hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-                
-		Xbee.send("local",hexAPI)
+		packet = self._APIze(self.cmd)
+		
+		Xbee.send("local", packet)
                 
 		while self.param==None:
-			pass			
-                                        	
-        def _requestPacket(cmd):
-                hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
+			pass
+
+	def _APIze(self,string,param=None):
+		hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
                 cmd = self._stringToHex(string)
                 hexAPI+=cmd
-                #print "Requesting AT#"+string
-                hexAPI[2]=len(hexAPI)-3
+		print param
+		if param is not None:
+			hexAPI+=param                
+                length = len(hexAPI)-3
+                hexAPI[1]=(length&0xFF00)>>8
+                hexAPI[2]= length&0x00FF
                 hexAPI+= [0xFF-sum(hexAPI[3::])&255]
-                return hexAPI
+		return hexAPI
 
         def _stringToHex(self, string):
                 ret=[]
@@ -239,9 +242,9 @@ class Xbee:
 		for cmd in necessaryAT:
 			self.AT[cmd]=AT(cmd)
 
-		if address is not None:
-			self.AT["SH"].set(address[:4])
-			self.AT["SL"].set(address[-4:])
+		#if address is not None:
+		#	self.AT["SH"].set(address[:4])
+		#	self.AT["SL"].set(address[-4:])
 		
 
 		#start threads
@@ -344,9 +347,9 @@ class Xbee:
 				
 	def updateAT(self, newAT):
 		if newAT.cmd in self.AT:
-			self.AT[newAT.cmd].set(newAT.param)
+			self.AT[newAT.cmd].param=newAT
 		else:
-			self.AT[newAT.cmd]=newAT
+			self.AT[newAT.cmd].param=newAT
 	
 	def test(self, destination=None, length=100000):
 		data=[]
@@ -434,10 +437,13 @@ class Xbee:
 		return ret
 		
 	def setAT(self,string,value):
-        	hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
-		hexAPI+=self.stringToHex(string)
-        	self.ser.write(self.formatAPI(hexAPI, value))
-		return self.listen()
+        	self.AT[string]=AT(string)
+		self.AT[string].set(self,[value])
+		
+		#hexAPI=[0x7E, 0x00, 0x04, 0x08, 0x01]
+		#hexAPI+=self.stringToHex(string)
+        	#self.ser.write(self.formatAPI(hexAPI, value))
+		#return self.listen()
 
 	def requestRemoteAT(self, string, address):
 		hexAPI=[0x7E, 0x00, 0x00, 0x17, 0x01]
