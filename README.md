@@ -1,6 +1,28 @@
 Bee-bootloader
 ==============
 
+# Dependencies
+* AVR studio (tested with 6.1)
+* avrdude (tested with 6.1 built from source, the version in the Debian repositories does /not/ work)
+The boot loader is in the same repository as the library which is a bit of a mess but it makes it easy to build
+
+# Building
+start the avr studio shell
+
+     cd to lufa/Bootloaders/CDC/
+     make
+
+the file "BootloaderCDC.hex" should be loaded onto the micro controller
+# Using
+    avrdude -c avr109 -p x128a3u -P /dev/ttyACM0 -D -U flash:w:./rom.hex -C ./avrdude.conf
+(specifying your avrdude.conf is not necessary if you have replaced the older avrdude.conf)
+
+# TODO
+* Figure out what's wrong with reading the test switch 
+* Integrate Xbee stuff
+
+#Possible XBee Path
+
 Reference: Xbee 900HB Manual: ftp://ftp1.digi.com/support/documentation/90002173_B.pdf
 
 Bee bootloader project
