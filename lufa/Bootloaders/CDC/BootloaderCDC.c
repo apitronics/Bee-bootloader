@@ -98,6 +98,10 @@ static inline void wdt_disable() {
 void Application_Jump_Check(void)
 {
 	bool JumpToApplication = false;
+	int i;
+
+	//initialize TWIE  
+
 
 	#if ((BOARD == BOARD_XPLAIN) || (BOARD == BOARD_XPLAIN_REV1))
 		/* Disable JTAG debugging */
@@ -105,7 +109,20 @@ void Application_Jump_Check(void)
 
 		/* Enable pull-up on the JTAG TCK pin so we can use it to select the mode */
 		PORTF |= (1 << 4);
-		Delay_MS(10);
+		Delay_MS(100);
+			TWIE.MASTER.CTRLB = TWI_MASTER_SMEN_bm;
+		TWIE.MASTER.BAUD = 0x90;
+		TWIE.MASTER.CTRLA = TWI_MASTER_ENABLE_bm; 
+	TWIE.MASTER.STATUS = TWI_MASTER_BUSSTATE_IDLE_gc;
+	//talk to DS1339
+	TWIE_MASTER_ADDR = 0b11010000;
+	while(!(TWIE.MASTER.STATUS & TWI_MASTER_WIF_bm));
+	TWIE_MASTER_DATA = 0xF;     //select STATUS register   
+	while(!(TWIE.MASTER.STATUS & TWI_MASTER_WIF_bm)); 
+	TWIE_MASTER_DATA = 0x00;    //clear regsiter
+	while(!(TWIE.MASTER.STATUS & TWI_MASTER_WIF_bm));
+
+
 
 		/* If the TCK pin is not jumpered to ground, start the user application instead */
 		JumpToApplication |= ((PINF & (1 << 4)) != 0);
@@ -148,7 +165,7 @@ int main(void)
 	SetupHardware();
 
 	/* Turn on first LED on the board to indicate that the bootloader has started */
-	LEDs_SetAllLEDs(LEDS_LED1);
+	//LEDs_SetAllLEDs(LEDS_LED1);
 
 	/* Enable global interrupts so that the USB stack can function */
 	GlobalInterruptEnable();
@@ -202,7 +219,7 @@ static void SetupHardware(void)
 
 	/* Initialize the USB and other board hardware drivers */
 	USB_Init();
-	LEDs_Init();
+//	LEDs_Init();
 
 #if (ARCH == ARCH_AVR8)
 	/* Bootloader active LED toggle timer initialization */
