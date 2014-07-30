@@ -109,7 +109,7 @@ void Application_Jump_Check(void)
 
 		/* Enable pull-up on the JTAG TCK pin so we can use it to select the mode */
 		PORTF |= (1 << 4);
-		Delay_MS(100);
+		Delay_MS(50);
 		
 		
 		
